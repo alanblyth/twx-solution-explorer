@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, input, signal, viewChild, ElementRef } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, input, output, signal, viewChild, ElementRef } from '@angular/core';
 import { SHARED_STYLES, colourOf } from './styles.ts';
 import { layoutSequence, toMermaid } from './sequence-layout.ts';
+import type { Message } from './sequence-layout.ts';
 import { download } from './graph-view.component.ts';
 import type { CallTree } from './models.ts';
 
@@ -46,13 +47,17 @@ import type { CallTree } from './models.ts';
           <rect class="activation" [attr.x]="activation.x - 5 + activation.level * 6" [attr.y]="activation.y1" width="10" [attr.height]="activation.y2 - activation.y1"/>
         }
         @for (message of layout().messages; track $index) {
-          @if (message.self) {
-            <path class="message" [attr.d]="'M' + (message.fromX + 6) + ',' + message.y + ' h28 v14 h-28'" marker-end="url(#seq-arrow)" fill="none"/>
-            <text [attr.x]="message.fromX + 40" [attr.y]="message.y + 4" class="label" [class.leaf]="message.kind !== 'script'">{{ message.label }}</text>
-          } @else {
-            <line class="message" [class.dashed]="message.dashed" [attr.x1]="message.fromX + side(message.fromX, message.toX)" [attr.x2]="message.toX - side(message.fromX, message.toX)" [attr.y1]="message.y" [attr.y2]="message.y" marker-end="url(#seq-arrow)"/>
-            <text [attr.x]="(message.fromX + message.toX) / 2" [attr.y]="message.y - 6" text-anchor="middle" class="label" [class.leaf]="message.kind !== 'script'">{{ message.label }}</text>
-          }
+          <g class="msg" [class.hot]="$index === hoveredMessage()" (pointerenter)="hoverMessage($index, message)" (pointerleave)="hoverMessage(null, null)">
+            @if (message.self) {
+              <path class="hit" [attr.d]="'M' + (message.fromX + 6) + ',' + message.y + ' h28 v14 h-28'"/>
+              <path class="message" [attr.d]="'M' + (message.fromX + 6) + ',' + message.y + ' h28 v14 h-28'" marker-end="url(#seq-arrow)" fill="none"/>
+              <text [attr.x]="message.fromX + 40" [attr.y]="message.y + 4" class="label" [class.leaf]="message.kind !== 'script'">{{ message.label }}</text>
+            } @else {
+              <line class="hit" [attr.x1]="message.fromX" [attr.x2]="message.toX" [attr.y1]="message.y" [attr.y2]="message.y"/>
+              <line class="message" [class.dashed]="message.dashed" [attr.x1]="message.fromX + side(message.fromX, message.toX)" [attr.x2]="message.toX - side(message.fromX, message.toX)" [attr.y1]="message.y" [attr.y2]="message.y" marker-end="url(#seq-arrow)"/>
+              <text [attr.x]="(message.fromX + message.toX) / 2" [attr.y]="message.y - 6" text-anchor="middle" class="label" [class.leaf]="message.kind !== 'script'">{{ message.label }}</text>
+            }
+          </g>
         }
       </svg>
     </div>
@@ -74,14 +79,26 @@ import type { CallTree } from './models.ts';
     .fragment .kind { font-size: 11px; font-weight: 700; fill: #1f2933; }
     .fragment .guard { font-size: 11px; fill: #44505c; }
     .fragment line { stroke: #8794a1; stroke-dasharray: 6 3; }
+    .msg { cursor: default; }
+    .msg .hit { stroke: transparent; stroke-width: 14; fill: none; }
+    .msg.hot .message { stroke: #b8860b; stroke-width: 2.4; }
+    .msg.hot .label { fill: #8a5a00; font-weight: 600; }
   `],
 })
 export class SequenceViewComponent {
   readonly tree = input.required<CallTree>();
+  /** The message under the pointer (its caller and the lines that make the call), or null when the pointer leaves. */
+  readonly messageHovered = output<Message | null>();
+  protected readonly hoveredMessage = signal<number | null>(null);
   protected readonly layout = computed(() => layoutSequence(this.tree()));
   protected readonly zoom = signal(1);
   protected readonly copied = signal(false);
   private readonly svg = viewChild.required<ElementRef<SVGSVGElement>>('svg');
+
+  protected hoverMessage(index: number | null, message: Message | null): void {
+    this.hoveredMessage.set(index);
+    this.messageHovered.emit(message);
+  }
 
   protected boxWidth(label: string): number { return Math.max(110, label.length * 7.4 + 24); }
   protected tabWidth(kind: string): number { return kind.length * 8 + 14; }
@@ -106,7 +123,7 @@ export class SequenceViewComponent {
     clone.setAttribute('width', String(this.layout().width));
     clone.setAttribute('height', String(this.layout().height));
     const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
-    style.textContent = 'text{font-family:sans-serif;font-size:11.5px} .participant{font-weight:600;font-size:12px} .lifeline{stroke:#b8c2cc;stroke-dasharray:4 4} .message{stroke:#44505c;stroke-width:1.4;fill:none} .dashed{stroke-dasharray:5 3} .activation{fill:#e3edf8;stroke:#5b6b7b} .fragment rect{fill:none;stroke:#8794a1} .fragment .tab{fill:#e4e9ee;stroke:#8794a1} .fragment line{stroke:#8794a1;stroke-dasharray:6 3}';
+    style.textContent = 'text{font-family:sans-serif;font-size:11.5px} .participant{font-weight:600;font-size:12px} .lifeline{stroke:#b8c2cc;stroke-dasharray:4 4} .message{stroke:#44505c;stroke-width:1.4;fill:none} .dashed{stroke-dasharray:5 3} .activation{fill:#e3edf8;stroke:#5b6b7b} .fragment rect{fill:none;stroke:#8794a1} .fragment .tab{fill:#e4e9ee;stroke:#8794a1} .fragment line{stroke:#8794a1;stroke-dasharray:6 3} .hit{display:none}';
     clone.prepend(style);
     download('sequence.svg', new XMLSerializer().serializeToString(clone), 'image/svg+xml');
   }
