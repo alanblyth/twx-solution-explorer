@@ -1,5 +1,6 @@
 import { analyzeScript, ME } from './js-analyzer.ts';
 import type { CallTree, EntityRef, ResolvedStep, ServiceKind, ServiceSummary, Step } from './models.ts';
+export { implementationsOf };
 import { entityKey } from './models.ts';
 
 /** Reads an entity's JSON (`GET /Thingworx/<collection>/<name>`). Returns null when it does not exist or the user may not see it. */
@@ -14,6 +15,7 @@ export interface ResolveOptions {
 interface Implementation {
   kind: ServiceKind;
   code?: string;
+  language?: 'javascript' | 'sql';
   implementedBy?: EntityRef;
   handler?: string;
 }
@@ -75,6 +77,8 @@ export class CallResolver {
     const implementation = await this.findImplementation(entity, service);
     node.kind = implementation.kind;
     node.implementedBy = implementation.implementedBy;
+    node.code = implementation.code;
+    node.language = implementation.language;
     if (implementation.kind !== 'script' || implementation.code === undefined) return node;
     if (depth >= options.maxDepth) {
       node.kind = 'limit';
@@ -92,7 +96,7 @@ export class CallResolver {
     for (const step of steps) {
       if (step.type === 'call') {
         const callee = await this.resolveService(step.target, me, step.service, options, stack, depth + 1, step.line);
-        resolved.push({ type: 'call', line: step.line, callee });
+        resolved.push({ type: 'call', line: step.line, lines: step.lines, callee });
       } else {
         const branches = [];
         for (const branch of step.branches) {
@@ -111,7 +115,7 @@ export class CallResolver {
     const own = implementationOf(body, service);
     if (own) return { ...classify(own), implementedBy: entity, handler: own.handlerName };
 
-    const definition = body.effectiveShape?.serviceDefinitions?.[service] ?? body.thingShape?.serviceDefinitions?.[service];
+    const definition = definitionsOf(body)[service];
     if (!definition) return this.searchParents(body, entity, service, 0);
     if (definition.sourceType === 'ThingPackage' || definition.sourceType === 'DataShape' || !definition.sourceName) {
       return { kind: 'builtin', implementedBy: definition.sourceName ? { collection: 'ThingPackages', name: definition.sourceName } : undefined };
@@ -147,8 +151,8 @@ export class CallResolver {
   async listServices(entity: EntityRef): Promise<ServiceSummary[]> {
     const body = await this.entity(entity.collection, entity.name as string);
     if (!body) return [];
-    const definitions = body.effectiveShape?.serviceDefinitions ?? body.thingShape?.serviceDefinitions ?? {};
-    const implementations = body.thingShape?.serviceImplementations ?? {};
+    const definitions = definitionsOf(body);
+    const implementations = implementationsOf(body);
     const summaries: ServiceSummary[] = [];
     for (const [name, definition] of Object.entries<any>(definitions)) {
       const sourceType = definition.sourceType ?? 'Unknown';
@@ -170,17 +174,29 @@ export class CallResolver {
   }
 }
 
+/** A Thing or template keeps its own services in `thingShape`; a Thing Shape keeps them at the top level of its JSON. */
+function implementationsOf(body: any): Record<string, any> {
+  return body?.thingShape?.serviceImplementations ?? body?.serviceImplementations ?? {};
+}
+
+function definitionsOf(body: any): Record<string, any> {
+  return body?.effectiveShape?.serviceDefinitions ?? body?.thingShape?.serviceDefinitions ?? body?.serviceDefinitions ?? {};
+}
+
 function implementationOf(body: any, service: string): any | null {
-  return body?.thingShape?.serviceImplementations?.[service] ?? null;
+  return implementationsOf(body)[service] ?? null;
 }
 
 function classify(implementation: any): Implementation {
   const handler: string = implementation.handlerName ?? '';
   if (SCRIPT_HANDLERS.has(handler)) {
     const code = implementation.configurationTables?.Script?.rows?.[0]?.code;
-    return { kind: 'script', code: typeof code === 'string' ? code : '' };
+    return { kind: 'script', code: typeof code === 'string' ? code : '', language: 'javascript' };
   }
-  if (SQL_HANDLERS.has(handler)) return { kind: 'sql' };
+  if (SQL_HANDLERS.has(handler)) {
+    const sql = implementation.configurationTables?.Query?.rows?.[0]?.sql;
+    return { kind: 'sql', code: typeof sql === 'string' ? sql : undefined, language: 'sql' };
+  }
   return { kind: 'java', handler };
 }
 

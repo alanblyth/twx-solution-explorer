@@ -6,6 +6,12 @@ import type { MemberEntity } from './extension-graph.ts';
 /** The user may not see or use the entity (HTTP 403 or 404). Common on a platform with organisational-unit visibility. */
 export class NotVisibleError extends Error {}
 
+/** A disabled Thing answers its services with 503 "Thing [...] is not enabled". */
+export class NotEnabledError extends Error {}
+
+export type LookupStatus = 'ok' | 'not-visible' | 'not-enabled';
+export interface DependencyLookup { items: MemberEntity[]; status: LookupStatus }
+
 export interface ApiOptions { baseUrl: string; appKey?: string }
 
 /** Thin client for the ThingWorx REST API, using the signed-in session (or an application key for development). */
@@ -29,6 +35,11 @@ export class TwxApi {
       method, headers: this.headers(), credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (response.status === 403 || response.status === 404) throw new NotVisibleError(`${response.status} ${path}`);
+    if (response.status === 503) {
+      const text = await response.text();
+      if (/not enabled/i.test(text)) throw new NotEnabledError(text);
+      throw new Error(`503: ${text}`);
+    }
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${path}`);
     const text = await response.text();
     return text.trim() ? JSON.parse(text) : null;
@@ -81,16 +92,44 @@ export class TwxApi {
     return (result?.rows ?? []).map((row: any) => ({ name: row.name, type: row.type }));
   }
 
-  /** Entities this entity uses (`direction` out) or that use it (`in`). Null when the entity is not visible to the user. */
-  async dependencies(direction: 'out' | 'in', type: string, name: string): Promise<MemberEntity[] | null> {
+  /** Entities this entity uses (`direction` out) or that use it (`in`), with why the lookup failed if it did. */
+  async dependencyLookup(direction: 'out' | 'in', type: string, name: string): Promise<DependencyLookup> {
     const service = direction === 'out' ? 'GetOutgoingDependencies' : 'GetIncomingDependencies';
     try {
       const result = await this.request('POST', `${collectionOfType(type)}/${this.encode(name)}/Services/${service}`, {});
-      return (result?.rows ?? []).map((row: any) => ({ name: row.name, type: row.type }));
+      return { items: (result?.rows ?? []).map((row: any) => ({ name: row.name, type: row.type })), status: 'ok' };
     } catch (error) {
-      if (error instanceof NotVisibleError) return null;
+      if (error instanceof NotVisibleError) return { items: [], status: 'not-visible' };
+      if (error instanceof NotEnabledError) return { items: [], status: 'not-enabled' };
       throw error;
     }
+  }
+
+  /** Entities this entity uses (`direction` out) or that use it (`in`). Null when the lookup failed (not visible, or a disabled Thing). */
+  async dependencies(direction: 'out' | 'in', type: string, name: string): Promise<MemberEntity[] | null> {
+    const lookup = await this.dependencyLookup(direction, type, name);
+    return lookup.status === 'ok' ? lookup.items : null;
+  }
+
+  /** The entities of a project (`Projects/<name>` `GetEntities`). */
+  async projectEntities(projectName: string): Promise<MemberEntity[]> {
+    const result = await this.request('POST', `Projects/${this.encode(projectName)}/Services/GetEntities`, {});
+    return (result?.rows ?? []).map((row: any) => ({ name: row.name, type: row.type }));
+  }
+
+  private dataThingNames: Promise<Set<string>> | null = null;
+
+  /** Names of Things that hold data (data tables, streams, value streams), read once, for drawing them as cylinders. */
+  dataThings(): Promise<Set<string>> {
+    if (!this.dataThingNames) {
+      const templates = ['DataTable', 'Stream', 'ValueStream'];
+      this.dataThingNames = Promise.all(templates.map((template) =>
+        this.request('POST', `ThingTemplates/${template}/Services/GetImplementingThings`, {})
+          .then((result) => (result?.rows ?? []).map((row: any) => String(row.name)))
+          .catch(() => [] as string[])))
+        .then((lists) => new Set(lists.flat()));
+    }
+    return this.dataThingNames;
   }
 }
 

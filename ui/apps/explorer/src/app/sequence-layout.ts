@@ -1,9 +1,13 @@
 import type { CallTree, ResolvedStep } from './models.ts';
-import { entityKey, entityLabel } from './models.ts';
+import { entityKey, entityLabel, serviceId } from './models.ts';
 import { textWidth } from './graph-layout.ts';
 
 export interface Participant { id: string; label: string; x: number; kind: string }
-export interface Message { y: number; fromX: number; toX: number; label: string; kind: string; self: boolean; dashed: boolean; line: number }
+export interface Message {
+  y: number; fromX: number; toX: number; label: string; kind: string; self: boolean; dashed: boolean; line: number;
+  /** The calling service and the lines of its code that make the call (empty for a return). */
+  callerId: string; lines: number[];
+}
 export interface Activation { x: number; y1: number; y2: number; level: number }
 export interface Frame { kind: string; label: string; x1: number; x2: number; y1: number; y2: number; dividers: { y: number; label: string }[] }
 export interface SequenceLayout {
@@ -40,17 +44,17 @@ export function layoutSequence(tree: CallTree): SequenceLayout {
   };
   ensure(tree);
 
-  const messages: { y: number; from: number; to: number; label: string; kind: string; dashed: boolean; line: number }[] = [];
+  const messages: { y: number; from: number; to: number; label: string; kind: string; dashed: boolean; line: number; callerId: string; lines: number[] }[] = [];
   const activations: { index: number; y1: number; y2: number; level: number }[] = [];
   const frames: { kind: string; label: string; low: number; high: number; y1: number; y2: number; dividers: { y: number; label: string }[] }[] = [];
   const levelOf = new Map<number, number>();
   let y = HEADER + ROW / 2;
 
-  const emitSteps = (steps: ResolvedStep[], callerIndex: number): Range => {
+  const emitSteps = (steps: ResolvedStep[], callerIndex: number, caller: CallTree): Range => {
     const range: Range = { low: callerIndex, high: callerIndex };
     for (const step of steps) {
       if (step.type === 'call') {
-        const part = emitCall(step.callee, callerIndex, step.line);
+        const part = emitCall(step.callee, callerIndex, step.line, step.lines, caller);
         range.low = Math.min(range.low, part.low);
         range.high = Math.max(range.high, part.high);
       } else {
@@ -62,7 +66,7 @@ export function layoutSequence(tree: CallTree): SequenceLayout {
             frame.dividers.push({ y: y - ROW / 2 + 6, label: branch.label });
             y += 16;
           }
-          const part = emitSteps(branch.steps, callerIndex);
+          const part = emitSteps(branch.steps, callerIndex, caller);
           frame.low = Math.min(frame.low, part.low);
           frame.high = Math.max(frame.high, part.high);
         });
@@ -75,20 +79,20 @@ export function layoutSequence(tree: CallTree): SequenceLayout {
     return range;
   };
 
-  const emitCall = (node: CallTree, callerIndex: number, line: number): Range => {
+  const emitCall = (node: CallTree, callerIndex: number, line: number, lines: number[], caller: CallTree): Range => {
     const calleeIndex = ensure(node);
     const callRow = y;
-    messages.push({ y: callRow, from: callerIndex, to: calleeIndex, label: `${node.service}()`, kind: node.kind, dashed: false, line });
+    messages.push({ y: callRow, from: callerIndex, to: calleeIndex, label: `${node.service}()`, kind: node.kind, dashed: false, line, callerId: serviceId(caller), lines });
     y += ROW;
     const range: Range = { low: Math.min(callerIndex, calleeIndex), high: Math.max(callerIndex, calleeIndex) };
     if (node.steps.length) {
       const level = levelOf.get(calleeIndex) ?? 0;
       levelOf.set(calleeIndex, level + 1);
       const top = callRow;
-      const inner = emitSteps(node.steps, calleeIndex);
+      const inner = emitSteps(node.steps, calleeIndex, node);
       range.low = Math.min(range.low, inner.low);
       range.high = Math.max(range.high, inner.high);
-      messages.push({ y, from: calleeIndex, to: callerIndex, label: '', kind: node.kind, dashed: true, line });
+      messages.push({ y, from: calleeIndex, to: callerIndex, label: '', kind: node.kind, dashed: true, line, callerId: serviceId(node), lines: [] });
       activations.push({ index: calleeIndex, y1: top, y2: y, level });
       levelOf.set(calleeIndex, level);
       y += ROW * 0.6;
@@ -96,7 +100,7 @@ export function layoutSequence(tree: CallTree): SequenceLayout {
     return range;
   };
 
-  emitSteps(tree.steps, 0);
+  emitSteps(tree.steps, 0, tree);
 
   const widest = Math.max(...order.map((item) => textWidth(item.label)), 80);
   const column = Math.max(170, widest + 40);
@@ -107,7 +111,7 @@ export function layoutSequence(tree: CallTree): SequenceLayout {
     participants,
     messages: messages.map((message) => ({
       y: message.y, fromX: xOf(message.from), toX: xOf(message.to), label: message.label, kind: message.kind,
-      self: message.from === message.to, dashed: message.dashed, line: message.line,
+      self: message.from === message.to, dashed: message.dashed, line: message.line, callerId: message.callerId, lines: message.lines,
     })),
     activations: activations.map((activation) => ({ x: xOf(activation.index), y1: activation.y1, y2: activation.y2, level: activation.level })),
     frames: frames.map((frame) => ({

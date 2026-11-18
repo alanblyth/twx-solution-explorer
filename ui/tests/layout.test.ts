@@ -5,7 +5,7 @@ import { layoutSequence, toMermaid } from '../apps/explorer/src/app/sequence-lay
 import type { CallTree } from '../apps/explorer/src/app/models.ts';
 
 const leaf = (name: string, service: string): CallTree => ({ entity: { collection: 'Things', name }, service, kind: 'script', steps: [] });
-const call = (callee: CallTree) => ({ type: 'call' as const, line: 1, callee });
+const call = (callee: CallTree) => ({ type: 'call' as const, line: 1, lines: [1], callee });
 const tree: CallTree = {
   entity: { collection: 'Things', name: 'A' }, service: 'Main', kind: 'script',
   steps: [

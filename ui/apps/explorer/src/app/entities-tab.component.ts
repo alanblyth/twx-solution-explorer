@@ -2,16 +2,23 @@ import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect
 import { SHARED_STYLES } from './styles.ts';
 import { GraphViewComponent } from './graph-view.component.ts';
 import { SequenceViewComponent } from './sequence-view.component.ts';
-import { layoutGraph } from './graph-layout.ts';
-import type { GraphEdge, GraphNode, PlacedNode } from './graph-layout.ts';
-import { CallResolver, countNodes, forEachCallee } from './call-resolver.ts';
-import { collectionOfType, entityKey, entityLabel, singular } from './models.ts';
+import { CodeViewComponent } from './code-view.component.ts';
+import { EMPTY_GRAPH, layoutGraph } from './graph-layout.ts';
+import type { GraphEdge, GraphNode, PlacedEdge, PlacedNode } from './graph-layout.ts';
+import type { Message } from './sequence-layout.ts';
+import { CallResolver, countNodes } from './call-resolver.ts';
+import { collectionOfType, entityLabel, serviceId, singular } from './models.ts';
 import type { CallTree, EntityRow, ServiceSummary } from './models.ts';
 import type { MemberEntity } from './extension-graph.ts';
 import type { TwxApi } from './twx-api.ts';
+import { shapeForType } from './node-shapes.ts';
+import { dependenciesFromDefinition, readInheritance } from './inheritance.ts';
+import type { InheritanceLevel } from './inheritance.ts';
+import { buildCallGraph, buildInheritanceGraph, callEdgeKey, inheritanceNames, layoutInheritance, missingCodeReason } from './entity-graphs.ts';
 
 const COLLECTIONS = ['Things', 'ThingTemplates', 'ThingShapes', 'DataShapes', 'Mashups', 'Projects'];
 const SERVICE_COLLECTIONS = new Set(['Things', 'ThingTemplates', 'ThingShapes']);
+const INHERITANCE_COLLECTIONS = SERVICE_COLLECTIONS;
 const NODE_LIMIT = 60;
 
 const KIND_TEXT: Record<string, string> = {
@@ -24,7 +31,7 @@ const KIND_TEXT: Record<string, string> = {
   selector: 'se-entities-tab',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.ShadowDom,
-  imports: [GraphViewComponent, SequenceViewComponent],
+  imports: [GraphViewComponent, SequenceViewComponent, CodeViewComponent],
   template: `
     <div class="layout">
       <aside class="picker">
@@ -55,13 +62,24 @@ const KIND_TEXT: Record<string, string> = {
             <button [class.primary]="subTab() === 'services'" (click)="subTab.set('services')" [disabled]="!hasServices()">Services</button>
           </div>
           @if (notVisible()) { <p class="warn">This entity could not be read: it does not exist or is not visible to you.</p> }
+          @if (disabled()) { <p class="warn">This Thing is disabled: dependencies come from its definition; what uses it is unknown.</p> }
+          @if (loadError()) { <p class="warn error">Could not load this entity: {{ loadError() }}</p> }
 
           @if (subTab() === 'dependencies') {
             <div class="deps">
+              @if (hasInheritance()) {
+                <div class="inherit" [class.wide]="dependencyGraph().nodes.length <= 1">
+                  <h4>Inheritance</h4>
+                  @if (inheritanceGraph().nodes.length) {
+                    <se-graph-view [graph]="inheritanceGraph()" [selectedNode]="inheritanceSelf()" (nodeClicked)="openInheritance($event)"/>
+                  } @else if (!loading()) { <p class="muted">No inheritance to show.</p> }
+                </div>
+              }
               <div class="graph">
+                <h4 [title]="hasInheritance() ? 'The template chain, shapes and derived entities are in the inheritance graph' : ''">{{ hasInheritance() ? 'Other dependencies' : 'Dependencies' }}</h4>
                 @if (dependencyGraph().nodes.length > 1) {
                   <se-graph-view [graph]="dependencyGraph()" [selectedNode]="'self'" (nodeClicked)="openDependency($event)"/>
-                } @else if (!loading()) { <p class="muted">No direct dependencies.</p> }
+                } @else if (!loading()) { <p class="muted">No other direct dependencies.</p> }
               </div>
               <div class="lists">
                 @if (loading()) { <p class="muted">Loading…</p> }
@@ -69,10 +87,10 @@ const KIND_TEXT: Record<string, string> = {
                 @for (group of groupedOutgoing(); track group.type) {
                   <div class="group"><span class="pill">{{ group.type }}</span> @for (item of group.items; track item.name) { <a (click)="openMember(item)">{{ item.name }}</a> }</div>
                 } @empty { <div class="muted">nothing</div> }
-                <h4>Used by ({{ incoming().length }})</h4>
+                <h4>Used by ({{ disabled() ? 'unknown' : incoming().length }})</h4>
                 @for (group of groupedIncoming(); track group.type) {
                   <div class="group"><span class="pill">{{ group.type }}</span> @for (item of group.items; track item.name) { <a (click)="openMember(item)">{{ item.name }}</a> }</div>
-                } @empty { <div class="muted">nothing</div> }
+                } @empty { <div class="muted">{{ disabled() ? 'unknown while the Thing is disabled' : 'nothing' }}</div> }
               </div>
             </div>
           } @else {
@@ -102,12 +120,18 @@ const KIND_TEXT: Record<string, string> = {
                   @if (analysing()) { <p class="muted">Reading scripts… {{ progress() }} services</p> }
                   @else if (tree(); as root) {
                     <p class="muted summary">{{ summary(root) }}</p>
-                    <div class="view">
-                      @if (view() === 'graph') {
-                        <se-graph-view [graph]="callGraph()" [selectedNode]="selectedNode()" (nodeClicked)="selectedNode.set($event.id)"/>
-                      } @else {
-                        <se-sequence-view [tree]="root"/>
-                      }
+                    <div class="view-row">
+                      <div class="view">
+                        @if (view() === 'graph') {
+                          <se-graph-view [graph]="callGraph()" [selectedNode]="selectedNode()" (nodeClicked)="focusService($event)" (edgeHovered)="hoverEdge($event)"/>
+                        } @else {
+                          <se-sequence-view [tree]="root" (messageHovered)="hoverMessage($event)"/>
+                        }
+                      </div>
+                      <div class="code-panel">
+                        @let panel = codePanel();
+                        <se-code-view [code]="panel.code" [language]="panel.language" [highlighted]="panel.lines" [title]="panel.title" [reason]="panel.reason"/>
+                      </div>
                     </div>
                     @if (selectedNodeInfo(); as info) { <p class="node-info"><b>{{ info.title }}</b> — {{ info.text }}</p> }
                   }
@@ -136,13 +160,18 @@ const KIND_TEXT: Record<string, string> = {
     .detail { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
     .title h2 { margin: 0; font-size: 16px; }
     .deps { flex: 1; display: flex; gap: 12px; min-height: 0; margin-top: 8px; }
-    .graph { flex: 1; min-width: 0; } .lists { width: 280px; overflow: auto; }
+    .graph, .inherit { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+    .graph { min-width: 220px; } .inherit { flex: 0 1 38%; } .inherit.wide { flex: 1 1 70%; } .graph h4, .inherit h4 { margin: 0 0 2px; }
+    .graph se-graph-view, .inherit se-graph-view { flex: 1; min-height: 0; }
+    .lists { width: 260px; overflow: auto; }
     .lists h4 { margin: 8px 0 4px; } .group { margin-bottom: 6px; line-height: 1.8; } .group a { margin-left: 8px; }
     a { color: #1565c0; cursor: pointer; text-decoration: underline; }
     .services { flex: 1; display: flex; gap: 12px; min-height: 0; margin-top: 8px; }
     .svc-list { width: 250px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
     .trace { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; gap: 6px; }
-    .view { flex: 1; min-height: 0; } .summary { margin: 0; }
+    .view-row { flex: 1; min-height: 0; display: flex; gap: 10px; }
+    .view { flex: 1.5; min-width: 0; min-height: 0; } .code-panel { flex: 1; min-width: 300px; min-height: 0; }
+    .summary { margin: 0; }
     .pill.own { background: #d6e8fb; color: #0f4f9a; }
     .node-info { margin: 0; padding: 6px 8px; background: #f3f7fb; border-radius: 4px; }
     .pad { padding: 12px 0; }
@@ -168,6 +197,10 @@ export class EntitiesTabComponent {
   protected readonly subTab = signal<'dependencies' | 'services'>('dependencies');
   protected readonly loading = signal(false);
   protected readonly notVisible = signal(false);
+  protected readonly disabled = signal(false);
+  protected readonly loadError = signal<string | null>(null);
+  protected readonly inheritance = signal<InheritanceLevel[]>([]);
+  protected readonly dataThings = signal<Set<string>>(new Set());
   protected readonly outgoing = signal<MemberEntity[]>([]);
   protected readonly incoming = signal<MemberEntity[]>([]);
   protected readonly services = signal<ServiceSummary[]>([]);
@@ -180,6 +213,10 @@ export class EntitiesTabComponent {
   protected readonly progress = signal(0);
   protected readonly tree = signal<CallTree | null>(null);
   protected readonly selectedNode = signal<string | null>(null);
+  /** The service whose code is shown: the root unless a call-graph node was clicked. */
+  protected readonly focusedService = signal<string | null>(null);
+  /** A hovered call (edge or message): the caller and the lines that make the call. Wins over the focused service. */
+  protected readonly hoveredCall = signal<{ callerId: string; lines: number[] } | null>(null);
 
   private resolver: CallResolver | null = null;
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -194,56 +231,67 @@ export class EntitiesTabComponent {
   protected readonly groupedOutgoing = computed(() => group(this.outgoing()));
   protected readonly groupedIncoming = computed(() => group(this.incoming()));
 
+  protected readonly hasInheritance = computed(() => INHERITANCE_COLLECTIONS.has(this.selected()?.collection ?? ''));
+  protected readonly inheritanceSelf = computed(() => {
+    const levels = this.inheritance();
+    const name = levels[0]?.name ?? this.selected()?.name;
+    return name ? `level:${name}` : null;
+  });
+
+  protected readonly inheritanceGraph = computed(() => {
+    const entity = this.selected();
+    if (!entity || !this.hasInheritance() || this.loading()) return EMPTY_GRAPH;
+    const graph = buildInheritanceGraph({ name: entity.name, collection: entity.collection }, this.inheritance(), this.incoming(), this.dataThings());
+    return layoutInheritance(graph, this.inheritanceSelf() ?? '');
+  });
+
   protected readonly dependencyGraph = computed(() => {
     const entity = this.selected();
-    if (!entity) return { nodes: [], edges: [], width: 0, height: 0 };
-    const nodes: GraphNode[] = [{ id: 'self', label: entity.name, sublabel: singular(entity.collection), kind: 'root' }];
+    if (!entity) return EMPTY_GRAPH;
+    const dataThings = this.dataThings();
+    const hidden = this.hasInheritance() ? inheritanceNames(this.inheritance(), this.incoming(), entity.collection) : new Set<string>();
+    const shown = (item: MemberEntity): boolean => !hidden.has(`${item.type}:${item.name}`);
+    const shapeOf = (item: MemberEntity) => shapeForType(item.type, item.type === 'Thing' && dataThings.has(item.name));
+    const nodes: GraphNode[] = [{ id: 'self', label: entity.name, sublabel: singular(entity.collection), kind: 'root', shape: shapeForType(entity.collection, entity.collection === 'Things' && dataThings.has(entity.name)) }];
     const edges: GraphEdge[] = [];
-    this.outgoing().slice(0, NODE_LIMIT).forEach((item) => { nodes.push({ id: `out:${item.type}:${item.name}`, label: item.name, sublabel: item.type, kind: 'outgoing' }); edges.push({ from: 'self', to: `out:${item.type}:${item.name}` }); });
-    this.incoming().slice(0, NODE_LIMIT).forEach((item) => { nodes.push({ id: `in:${item.type}:${item.name}`, label: item.name, sublabel: item.type, kind: 'incoming' }); edges.push({ from: `in:${item.type}:${item.name}`, to: 'self' }); });
+    this.outgoing().filter(shown).slice(0, NODE_LIMIT).forEach((item) => { nodes.push({ id: `out:${item.type}:${item.name}`, label: item.name, sublabel: item.type, kind: 'outgoing', shape: shapeOf(item) }); edges.push({ from: 'self', to: `out:${item.type}:${item.name}` }); });
+    this.incoming().filter(shown).slice(0, NODE_LIMIT).forEach((item) => { nodes.push({ id: `in:${item.type}:${item.name}`, label: item.name, sublabel: item.type, kind: 'incoming', shape: shapeOf(item) }); edges.push({ from: `in:${item.type}:${item.name}`, to: 'self' }); });
     return layoutGraph(nodes, edges, 'LR');
   });
 
-  protected readonly callGraph = computed(() => {
+  private readonly callModel = computed(() => {
     const root = this.tree();
-    if (!root) return { nodes: [], edges: [], width: 0, height: 0 };
-    const nodes = new Map<string, GraphNode>();
-    const counts = new Map<string, number>();
-    const idOf = (node: CallTree): string => `${entityKey(node.entity)}.${node.service}`;
-    const add = (node: CallTree, isRoot: boolean): void => {
-      const id = idOf(node);
-      const existing = nodes.get(id);
-      if (!existing || (existing.kind === 'recursive' && node.kind !== 'recursive')) {
-        nodes.set(id, { id, label: `${node.service}()`, sublabel: entityLabel(node.entity), kind: isRoot ? 'root' : node.kind });
-      }
+    return root ? buildCallGraph(root, this.dataThings()) : null;
+  });
+
+  protected readonly callGraph = computed(() => {
+    const model = this.callModel();
+    return model ? layoutGraph(model.nodes, model.edges, 'LR') : EMPTY_GRAPH;
+  });
+
+  /** What the code view shows: a hovered call's caller with the call lines, or else the focused service. */
+  protected readonly codePanel = computed(() => {
+    const model = this.callModel();
+    const root = this.tree();
+    const hovered = this.hoveredCall();
+    const id = hovered?.callerId ?? this.focusedService() ?? (root ? serviceId(root) : null);
+    const node = id && model ? model.services.get(id) ?? null : null;
+    if (!node) return { code: null, language: 'javascript' as const, lines: [] as number[], title: '', reason: 'Pick a service.' };
+    const reason = missingCodeReason(node);
+    return {
+      code: reason ? null : node.code ?? null,
+      language: node.language ?? 'javascript',
+      lines: hovered ? hovered.lines : [],
+      title: `${entityLabel(node.entity)}.${node.service}()${!reason && node.implementedBy?.name && node.implementedBy.name !== node.entity.name ? ` · from ${entityLabel(node.implementedBy)}` : ''}`,
+      reason: reason ?? '',
     };
-    const visit = (node: CallTree, isRoot: boolean): void => {
-      add(node, isRoot);
-      forEachCallee(node.steps, (callee) => {
-        const key = `${idOf(node)}\u0000${idOf(callee)}`;
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-        if (counts.get(key) === 1) visit(callee, false);
-      });
-    };
-    visit(root, true);
-    const edges: GraphEdge[] = [...counts.entries()].map(([key, count]) => {
-      const [from, to] = key.split('\u0000');
-      return { from, to, label: count > 1 ? `×${count}` : undefined };
-    });
-    return layoutGraph([...nodes.values()], edges, 'LR');
   });
 
   protected readonly selectedNodeInfo = computed(() => {
     const id = this.selectedNode();
     const root = this.tree();
     if (!id || !root) return null;
-    let found: CallTree | null = null;
-    const visit = (node: CallTree): void => {
-      if (`${entityKey(node.entity)}.${node.service}` === id && (!found || found.kind === 'recursive')) found = node;
-      forEachCallee(node.steps, (callee) => { if (callee !== node) visit(callee); });
-    };
-    visit(root);
-    const node = found as CallTree | null;
+    const node = this.callModel()?.services.get(id) ?? null;
     if (!node) return null;
     const where = node.implementedBy?.name && node.implementedBy.name !== node.entity.name ? ` Implemented on ${entityLabel(node.implementedBy)}.` : '';
     return { title: `${entityLabel(node.entity)}.${node.service}()`, text: `${KIND_TEXT[node.kind] ?? node.kind}.${where}${node.note ? ' ' + node.note + '.' : ''}` };
@@ -305,22 +353,45 @@ export class EntitiesTabComponent {
     this.services.set([]);
     this.outgoing.set([]);
     this.incoming.set([]);
+    this.inheritance.set([]);
     this.notVisible.set(false);
+    this.disabled.set(false);
+    this.loadError.set(null);
     this.loading.set(true);
     if (!this.resolver) this.resolver = this.newResolver();
+    const resolver = this.resolver;
+    const api = this.api();
+    void api.dataThings().then((names) => this.dataThings.set(names)).catch(() => undefined);
     const type = singular(row.collection);
-    const [outgoing, incoming, services, body] = await Promise.all([
-      this.api().dependencies('out', type, row.name),
-      this.api().dependencies('in', type, row.name),
-      SERVICE_COLLECTIONS.has(row.collection) ? this.resolver.listServices({ collection: row.collection, name: row.name }) : Promise.resolve([]),
-      this.api().entity(row.collection, row.name),
-    ]);
-    if (this.selected() !== row) return;
-    this.outgoing.set(outgoing ?? []);
-    this.incoming.set(incoming ?? []);
-    this.services.set(services);
-    this.notVisible.set(body === null);
-    this.loading.set(false);
+    // Several reads ask for the same entity bodies; read each once per choice.
+    const bodies = new Map<string, Promise<any | null>>();
+    const read = (collection: string, name: string): Promise<any | null> => {
+      const key = `${collection}/${name}`;
+      let body = bodies.get(key);
+      if (!body) { body = api.entity(collection, name); bodies.set(key, body); }
+      return body;
+    };
+    try {
+      const [outgoing, incoming, services, body, levels] = await Promise.all([
+        api.dependencyLookup('out', type, row.name),
+        api.dependencyLookup('in', type, row.name),
+        SERVICE_COLLECTIONS.has(row.collection) ? resolver.listServices({ collection: row.collection, name: row.name }) : Promise.resolve([]),
+        read(row.collection, row.name),
+        INHERITANCE_COLLECTIONS.has(row.collection) ? readInheritance(read, row.collection, row.name) : Promise.resolve([]),
+      ]);
+      if (this.selected() !== row) return;
+      const isDisabled = outgoing.status === 'not-enabled' || incoming.status === 'not-enabled';
+      this.disabled.set(isDisabled);
+      this.outgoing.set(outgoing.status === 'not-enabled' ? dependenciesFromDefinition(row.collection, body) : outgoing.items);
+      this.incoming.set(incoming.items);
+      this.services.set(services);
+      this.inheritance.set(levels);
+      this.notVisible.set(body === null);
+    } catch (error) {
+      if (this.selected() === row) this.loadError.set(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (this.selected() === row) this.loading.set(false);
+    }
     if (!SERVICE_COLLECTIONS.has(row.collection)) this.subTab.set('dependencies');
   }
 
@@ -332,6 +403,29 @@ export class EntitiesTabComponent {
     if (node.id === 'self') return;
     const [, type, ...rest] = node.id.split(':');
     this.openMember({ type, name: rest.join(':') });
+  }
+
+  protected openInheritance(node: PlacedNode): void {
+    if (node.id === this.inheritanceSelf() || node.id === 'derived:more') return;
+    const [prefix, ...rest] = node.id.split(':');
+    if (prefix === 'level') this.openMember({ type: node.sublabel ?? 'ThingTemplate', name: rest.join(':') });
+    else if (prefix === 'shape') this.openMember({ type: 'ThingShape', name: rest.join(':') });
+    else if (prefix === 'derived') this.openMember({ type: rest[0], name: rest.slice(1).join(':') });
+  }
+
+  protected focusService(node: PlacedNode): void {
+    this.selectedNode.set(node.id);
+    this.focusedService.set(node.id);
+  }
+
+  protected hoverEdge(edge: PlacedEdge | null): void {
+    const lines = edge ? this.callModel()?.callLines.get(callEdgeKey(edge.from, edge.to)) : undefined;
+    this.hoveredCall.set(edge && lines ? { callerId: edge.from, lines } : null);
+  }
+
+  protected hoverMessage(message: Message | null): void {
+    // A return carries no lines; only calls point at code.
+    this.hoveredCall.set(message && message.lines.length ? { callerId: message.callerId, lines: message.lines } : null);
   }
 
   protected openMember(member: MemberEntity): void {
@@ -361,12 +455,19 @@ export class EntitiesTabComponent {
     this.analysing.set(true);
     this.progress.set(0);
     this.selectedNode.set(null);
-    const tree = await this.resolver.resolve({ collection: entity.collection, name: entity.name }, service, {
-      maxDepth: this.depth(), onProgress: (count) => { if (ticket === this.analysisCounter) this.progress.set(count); },
-    });
-    if (ticket !== this.analysisCounter) return;
-    this.tree.set(tree);
-    this.analysing.set(false);
+    this.focusedService.set(null);
+    this.hoveredCall.set(null);
+    this.loadError.set(null);
+    try {
+      const tree = await this.resolver.resolve({ collection: entity.collection, name: entity.name }, service, {
+        maxDepth: this.depth(), onProgress: (count) => { if (ticket === this.analysisCounter) this.progress.set(count); },
+      });
+      if (ticket === this.analysisCounter) this.tree.set(tree);
+    } catch (error) {
+      if (ticket === this.analysisCounter) this.loadError.set(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (ticket === this.analysisCounter) this.analysing.set(false);
+    }
   }
 }
 
