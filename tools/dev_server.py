@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Serve the built Angular bundle on a test page and proxy /Thingworx to a development platform, signed in as Administrator.
+
+  python tools/dev_server.py [--port 4300]
+
+The platform and its password come from twxlab (TWX_BASE, TWX_ADMIN_PASSWORD or TWX_ADMIN_PASSWORD_FILE). Development only:
+every request is sent with the Administrator's credentials, so never expose the port.
+"""
+import argparse, base64, http.server, os, urllib.error, urllib.parse, urllib.request
+from twxlab import client
+
+BUNDLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ui", "dist", "explorer", "main.js")
+PAGE = """<!doctype html><meta charset="utf-8"><title>Solution Explorer (dev)</title>
+<body style="margin:0"><se-explorer base-url="/Thingworx" style="display:block;height:100vh"></se-explorer>
+<script>
+// Test hook: /?tab=entities&entity=CM.Provisioning&service=RegisterApplication&view=sequence
+const element = document.querySelector("se-explorer");
+for (const [name, value] of new URLSearchParams(location.search)) element.setAttribute(name === "tab" ? "start-tab" : name === "collection" ? "entity-collection" : name, value);
+</script>
+<script src="/main.js"></script></body>"""
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    authorization = None
+
+    def do_GET(self):
+        if self.path.split("?")[0] == "/":
+            return self.reply(200, PAGE.encode(), "text/html")
+        if self.path.split("?")[0] == "/main.js":
+            with open(BUNDLE, "rb") as handle:
+                return self.reply(200, handle.read(), "text/javascript")
+        self.proxy()
+
+    do_POST = proxy = lambda self: self.forward()
+
+    def forward(self):
+        if not self.path.startswith("/Thingworx/"):
+            return self.reply(404, b"not found", "text/plain")
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length else None
+        target = client.BASE.rsplit("/Thingworx", 1)[0] + self.path
+        request = urllib.request.Request(target, data=body, method=self.command)
+        for name in ("Content-Type", "Accept", "X-XSRF-TOKEN"):
+            if self.headers.get(name):
+                request.add_header(name, self.headers[name])
+        request.add_header("Authorization", Handler.authorization)
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                self.reply(response.status, response.read(), response.headers.get("Content-Type", "application/json"))
+        except urllib.error.HTTPError as error:
+            self.reply(error.code, error.read(), error.headers.get("Content-Type", "text/plain"))
+
+    def reply(self, status, payload, content_type):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *args):
+        pass
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=4300)
+    options = parser.parse_args()
+    Handler.authorization = "Basic " + base64.b64encode(f"Administrator:{client.admin_password()}".encode()).decode()
+    print(f"http://localhost:{options.port}/  ->  {client.BASE}")
+    http.server.ThreadingHTTPServer(("127.0.0.1", options.port), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

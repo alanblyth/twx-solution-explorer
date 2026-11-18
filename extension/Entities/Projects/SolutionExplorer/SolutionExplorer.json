@@ -1,0 +1,50 @@
+{
+  "Projects": {
+    "Project": [
+      {
+        "artifactId": "",
+        "aspects": {
+          "projectType": "Component"
+        },
+        "avatar": "",
+        "configurationTableDefinitions": {},
+        "configurationTables": {},
+        "dependsOn": "{\"extensions\":\"\",\"projects\":\"\"}",
+        "description": "Solution Explorer extension",
+        "designTimePermissions": {
+          "Create": [],
+          "Delete": [],
+          "Metadata": [],
+          "Read": [],
+          "Update": []
+        },
+        "documentationContent": "",
+        "groupId": "",
+        "homeMashup": "",
+        "minPlatformVersion": "",
+        "name": "SolutionExplorer",
+        "packageVersion": "0.1.0",
+        "projectName": "SolutionExplorer",
+        "publishResult": "",
+        "runTimePermissions": {
+          "permissions": [
+            {
+              "EventInvoke": [],
+              "EventSubscribe": [],
+              "PropertyRead": [],
+              "PropertyWrite": [],
+              "ServiceInvoke": [],
+              "resourceName": "*"
+            }
+          ]
+        },
+        "state": "DRAFT",
+        "tags": [],
+        "visibilityPermissions": {
+          "Visibility": []
+        }
+      }
+    ]
+  },
+  "universal": "multiPartSourceControl;password;sourceControl"
+}

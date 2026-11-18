@@ -1,0 +1,188 @@
+{
+  "Mashups": {
+    "Mashup": [
+      {
+        "aspects": {
+          "isFlex": "true",
+          "isResponsive": true,
+          "mashupType": "mashup"
+        },
+        "avatar": "",
+        "columns": 0.0,
+        "configurationTableDefinitions": {},
+        "configurationTables": {
+          "MobileSettings": {
+            "aspects": {},
+            "dataShape": {
+              "fieldDefinitions": {
+                "disableZoom": {
+                  "aspects": {
+                    "defaultValue": false,
+                    "friendlyName": "Disable Zoom"
+                  },
+                  "baseType": "BOOLEAN",
+                  "description": "Disables zooming in and out within the mashup",
+                  "name": "disableZoom",
+                  "ordinal": 0
+                },
+                "fullScreenMode": {
+                  "aspects": {
+                    "defaultValue": true,
+                    "friendlyName": "Full Screen Mode"
+                  },
+                  "baseType": "BOOLEAN",
+                  "description": "Open the mashup in full screen mode",
+                  "name": "fullScreenMode",
+                  "ordinal": 0
+                },
+                "height": {
+                  "aspects": {
+                    "friendlyName": "Height"
+                  },
+                  "baseType": "STRING",
+                  "description": "The height of the mashup page",
+                  "name": "height",
+                  "ordinal": 0
+                },
+                "heightType": {
+                  "aspects": {
+                    "defaultValue": "device-height",
+                    "friendlyName": "Height Type"
+                  },
+                  "baseType": "STRING",
+                  "description": "Use the height of the device display, or a custom height (in px)",
+                  "name": "heightType",
+                  "ordinal": 0
+                },
+                "initialScale": {
+                  "aspects": {
+                    "defaultValue": 1.0,
+                    "friendlyName": "Initial Scale"
+                  },
+                  "baseType": "NUMBER",
+                  "description": "The initial zoom scale when the mashup is loaded for the first time",
+                  "name": "initialScale",
+                  "ordinal": 0
+                },
+                "iosShortcutIconTitle": {
+                  "aspects": {
+                    "friendlyName": "Shortcut Icon Title"
+                  },
+                  "baseType": "STRING",
+                  "description": "A title for the mashup shortcut on the iOS home screen",
+                  "name": "iosShortcutIconTitle",
+                  "ordinal": 0
+                },
+                "iosStatusBarAppearance": {
+                  "aspects": {
+                    "defaultValue": "black-translucent",
+                    "friendlyName": "Status Bar Appearance"
+                  },
+                  "baseType": "STRING",
+                  "description": "The style of the iOS status bar",
+                  "name": "iosStatusBarAppearance",
+                  "ordinal": 0
+                },
+                "maximumScale": {
+                  "aspects": {
+                    "defaultValue": 10.0,
+                    "friendlyName": "Maximum Scale"
+                  },
+                  "baseType": "NUMBER",
+                  "description": "The maximum scale that users can zoom out to",
+                  "name": "maximumScale",
+                  "ordinal": 0
+                },
+                "minimumScale": {
+                  "aspects": {
+                    "defaultValue": 0.1,
+                    "friendlyName": "Minimum Scale"
+                  },
+                  "baseType": "NUMBER",
+                  "description": "The minimum scale that users can zoom out to",
+                  "name": "minimumScale",
+                  "ordinal": 0
+                },
+                "width": {
+                  "aspects": {
+                    "friendlyName": "Width"
+                  },
+                  "baseType": "STRING",
+                  "description": "The width of the mashup page",
+                  "name": "width",
+                  "ordinal": 0
+                },
+                "widthType": {
+                  "aspects": {
+                    "defaultValue": "device-width",
+                    "friendlyName": "Width Type"
+                  },
+                  "baseType": "STRING",
+                  "description": "Use the width of the device display, or a custom width (in px)",
+                  "name": "widthType",
+                  "ordinal": 0
+                }
+              }
+            },
+            "dataShapeName": "",
+            "description": "Mashup Mobile Settings",
+            "isHidden": true,
+            "isMultiRow": false,
+            "name": "MobileSettings",
+            "ordinal": 0,
+            "rows": [
+              {
+                "disableZoom": false,
+                "fullScreenMode": true,
+                "height": "",
+                "heightType": "device-height",
+                "initialScale": 1.0,
+                "iosShortcutIconTitle": "",
+                "iosStatusBarAppearance": "black-translucent",
+                "maximumScale": 10.0,
+                "minimumScale": 0.1,
+                "width": "",
+                "widthType": "device-width"
+              }
+            ]
+          }
+        },
+        "description": "Explore extension and entity dependencies and service call chains",
+        "designTimePermissions": {
+          "Create": [],
+          "Delete": [],
+          "Metadata": [],
+          "Read": [],
+          "Update": []
+        },
+        "documentationContent": "",
+        "homeMashup": "",
+        "name": "SE.Explorer",
+        "parameterDefinitions": {},
+        "preview": "",
+        "projectName": "SolutionExplorer",
+        "rows": 0.0,
+        "runTimePermissions": {
+          "permissions": [
+            {
+              "EventInvoke": [],
+              "EventSubscribe": [],
+              "PropertyRead": [],
+              "PropertyWrite": [],
+              "ServiceInvoke": [],
+              "resourceName": "*"
+            }
+          ]
+        },
+        "tags": [],
+        "thingShapes": [],
+        "thingTemplates": [],
+        "things": [],
+        "visibilityPermissions": {
+          "Visibility": []
+        }
+      }
+    ]
+  },
+  "universal": "multiPartSourceControl;password;sourceControl"
+}
