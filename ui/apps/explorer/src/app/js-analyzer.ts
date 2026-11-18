@@ -132,6 +132,7 @@ function resolveEntity(node: Node, scope: Scope): EntityRef | null {
 
 class Walker {
   private readonly inlineStack: string[] = [];
+  private readonly inlineLines: number[] = [];
   private readonly code: string;
   private scope: Scope;
 
@@ -218,13 +219,14 @@ class Walker {
       this.visitArguments(node.arguments, into);
       const service = callee.computed ? evaluateString(callee.property, this.scope)?.text : callee.property.name;
       if (target && service) {
-        const step: CallStep = { type: 'call', target, service, line: node.loc?.start.line ?? 0 };
+        const line = node.loc?.start.line ?? 0;
+        const step: CallStep = { type: 'call', target, service, line, lines: [...this.inlineLines, line] };
         into.push(step);
       }
       return;
     }
     this.visitArguments(node.arguments, into);
-    if (callee.type === 'Identifier') this.inline(callee.name, node.arguments, into);
+    if (callee.type === 'Identifier') this.inline(callee.name, node.arguments, into, node.loc?.start.line ?? 0);
     else this.visit(callee, into);
   }
 
@@ -244,7 +246,7 @@ class Walker {
    * Walks a local function where it is called. The arguments are bound to the parameters first, so a helper such as
    * `findRows(tableName, ...)` called with `"CM.Registry"` calls `Things["CM.Registry"]`, not `Things[tableName]`.
    */
-  private inline(name: string, args: Node[], into: Step[]): void {
+  private inline(name: string, args: Node[], into: Step[], callLine: number): void {
     const fn = this.scope.functions.get(name);
     if (!fn || this.inlineStack.includes(name) || this.inlineStack.length >= MAX_INLINE_DEPTH) return;
     const callerScope = this.scope;
@@ -263,10 +265,12 @@ class Walker {
     if (fn.body?.type === 'BlockStatement') collectDeclarations(fn.body, local);
     this.scope = local;
     this.inlineStack.push(name);
+    this.inlineLines.push(callLine);
     try {
       this.visit(fn.body, into);
     } finally {
       this.inlineStack.pop();
+      this.inlineLines.pop();
       this.scope = callerScope;
     }
   }
@@ -336,8 +340,8 @@ function regexFallback(code: string): Step[] {
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(code))) {
     const line = code.slice(0, match.index).split('\n').length;
-    if (match[1]) steps.push({ type: 'call', target: { collection: match[1], name: match[2] ?? match[3] }, service: match[4], line });
-    else steps.push({ type: 'call', target: { collection: ME, name: null }, service: match[5], line });
+    if (match[1]) steps.push({ type: 'call', target: { collection: match[1], name: match[2] ?? match[3] }, service: match[4], line, lines: [line] });
+    else steps.push({ type: 'call', target: { collection: ME, name: null }, service: match[5], line, lines: [line] });
   }
   return steps;
 }

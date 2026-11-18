@@ -15,6 +15,8 @@ export interface CallStep {
   target: EntityRef;
   service: string;
   line: number;
+  /** Lines that lead to the call: each local helper's call site, then the call itself. */
+  lines: number[];
 }
 
 /** A structured block around calls: if/else, loop, try/catch, switch. */
@@ -44,6 +46,9 @@ export interface CallTree {
   line?: number;
   steps: ResolvedStep[];
   note?: string;
+  /** The implementation's source, when it can be shown. */
+  code?: string;
+  language?: 'javascript' | 'sql';
 }
 
 export type ResolvedStep = ResolvedCall | ResolvedFrame;
@@ -51,6 +56,7 @@ export type ResolvedStep = ResolvedCall | ResolvedFrame;
 export interface ResolvedCall {
   type: 'call';
   line: number;
+  lines: number[];
   callee: CallTree;
 }
 
@@ -107,4 +113,9 @@ export function collectionOfType(type: string): string {
   if (type === 'Directory') return 'Directories';
   if (type === 'Dashboard') return 'Dashboards';
   return type.endsWith('s') ? type : `${type}s`;
+}
+
+/** Identity of one service on one entity, used for graph nodes and code focus. */
+export function serviceId(tree: CallTree): string {
+  return `${entityKey(tree.entity)}.${tree.service}`;
 }

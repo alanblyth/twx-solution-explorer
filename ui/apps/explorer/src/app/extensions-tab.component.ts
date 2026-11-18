@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject, input, output, signal, OnInit } from '@angular/core';
 import { SHARED_STYLES } from './styles.ts';
 import { GraphViewComponent } from './graph-view.component.ts';
-import { layoutGraph } from './graph-layout.ts';
+import { EMPTY_GRAPH, layoutGraph } from './graph-layout.ts';
 import type { GraphEdge, GraphNode, PlacedEdge, PlacedNode } from './graph-layout.ts';
 import { buildExtensionGraph, memberKey } from './extension-graph.ts';
 import type { ExtensionGraph, MemberEntity } from './extension-graph.ts';
@@ -110,7 +110,7 @@ export class ExtensionsTabComponent implements OnInit {
 
   protected readonly placed = computed(() => {
     const built = this.graph();
-    if (!built) return { nodes: [], edges: [], width: 0, height: 0 };
+    if (!built) return EMPTY_GRAPH;
     const connected = new Set<string>();
     built.edges.forEach((edge) => { connected.add(edge.from); connected.add(edge.to); });
     const nodes: GraphNode[] = built.packages

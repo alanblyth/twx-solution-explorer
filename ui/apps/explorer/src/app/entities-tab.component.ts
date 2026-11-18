@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect
 import { SHARED_STYLES } from './styles.ts';
 import { GraphViewComponent } from './graph-view.component.ts';
 import { SequenceViewComponent } from './sequence-view.component.ts';
-import { layoutGraph } from './graph-layout.ts';
+import { EMPTY_GRAPH, layoutGraph } from './graph-layout.ts';
 import type { GraphEdge, GraphNode, PlacedNode } from './graph-layout.ts';
 import { CallResolver, countNodes, forEachCallee } from './call-resolver.ts';
 import { collectionOfType, entityKey, entityLabel, singular } from './models.ts';
@@ -196,7 +196,7 @@ export class EntitiesTabComponent {
 
   protected readonly dependencyGraph = computed(() => {
     const entity = this.selected();
-    if (!entity) return { nodes: [], edges: [], width: 0, height: 0 };
+    if (!entity) return EMPTY_GRAPH;
     const nodes: GraphNode[] = [{ id: 'self', label: entity.name, sublabel: singular(entity.collection), kind: 'root' }];
     const edges: GraphEdge[] = [];
     this.outgoing().slice(0, NODE_LIMIT).forEach((item) => { nodes.push({ id: `out:${item.type}:${item.name}`, label: item.name, sublabel: item.type, kind: 'outgoing' }); edges.push({ from: 'self', to: `out:${item.type}:${item.name}` }); });
@@ -206,7 +206,7 @@ export class EntitiesTabComponent {
 
   protected readonly callGraph = computed(() => {
     const root = this.tree();
-    if (!root) return { nodes: [], edges: [], width: 0, height: 0 };
+    if (!root) return EMPTY_GRAPH;
     const nodes = new Map<string, GraphNode>();
     const counts = new Map<string, number>();
     const idOf = (node: CallTree): string => `${entityKey(node.entity)}.${node.service}`;
