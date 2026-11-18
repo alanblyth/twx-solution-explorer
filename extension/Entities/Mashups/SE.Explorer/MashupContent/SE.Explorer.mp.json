@@ -1,0 +1,39 @@
+{
+  "Bindings": [],
+  "CustomCSS": "",
+  "Data": {},
+  "Events": [],
+  "UI": {
+    "Properties": {
+      "Area": "UI",
+      "Height": 800,
+      "Id": "mashup-root",
+      "ResponsiveLayout": false,
+      "Title": "SE.Explorer",
+      "Type": "mashup",
+      "Visible": true,
+      "Width": 1200,
+      "Z-index": 10
+    },
+    "Widgets": [
+      {
+        "Properties": {
+          "Area": "UI",
+          "DisplayName": "se-explorer-1",
+          "Height": 780,
+          "Id": "se-explorer-1",
+          "Left": 10,
+          "Top": 10,
+          "Type": "se-explorer",
+          "Visible": true,
+          "Width": 1180,
+          "Z-index": 10,
+          "StartTab": "extensions",
+          "EntityCollection": "Things",
+          "View": "graph"
+        },
+        "Widgets": []
+      }
+    ]
+  }
+}
