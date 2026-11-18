@@ -4,7 +4,8 @@ A ThingWorx 10.2 extension (`SolutionExplorer`) with a mashup, `SE.Explorer`, th
 
 | Tab | What it shows |
 |---|---|
-| **Extensions** | Every installed extension as a node. An edge A → B means A declares B in `dependsOn`, or an entity shipped by A uses an entity shipped by B (the label counts those entity links; click an edge to list them). Circular dependencies are flagged. |
+| **Extensions** | Every installed extension as a node. An edge A → B means A declares B in `dependsOn`, or an entity shipped by A uses an entity shipped by B (the label counts those entity links; click an edge to list them). Circular dependencies are flagged. **Show contents** opens a selected extension on the Projects & Extensions tab. |
+| **Projects & Extensions** | Pick a project or an extension (filterable list) and scan it. The graph shows its entities inside a frame, the links among them, and their links to entities outside, grouped by the project or extension that holds them (or shown one by one). Links come from the dependency services and, optionally, from calls in the scripts of its Things, templates and shapes; "Show what uses it" adds incoming links. The side panel counts internal, outgoing and incoming links per outside owner and lists the links of a clicked node or edge; open an entity in the Entities tab from there. Disabled Things are read from their definition. |
 | **Entities** | Pick a Thing, template, shape, data shape, mashup or project. **Dependencies**: what it uses and what uses it, as a graph and grouped lists (click to navigate). **Services**: pick a service (own, inherited or built-in) to see every service it can call, down to a chosen depth, as a **call graph** and as a **sequence diagram** generated from the JavaScript (calls in source order, with `alt`/`opt`/`loop`/`try` frames). Copy the diagram as Mermaid, or save either view as SVG. |
 
 Java entities and Java-implemented services are out of scope: they appear as leaves.
@@ -28,7 +29,7 @@ A signed-in user sees only what their visibility and permissions allow. An entit
 |---|---|
 | `ui/` | Angular 22 app (zoneless, one custom element `se-explorer`, shadow DOM). `apps/explorer/src/app/`: `js-analyzer.ts`, `call-resolver.ts`, `extension-graph.ts`, `graph-layout.ts` (dagre), `sequence-layout.ts` hold the logic and have no Angular dependency; the `*.component.ts` files are the views |
 | `extension/` | Extension source: `metadata.xml`, `ui/` widget wrappers, `Entities/` (JSON, written by `generate_entities.py` with the twxlab builders), `build.py` |
-| `tools/dev_server.py` | Dev page and proxy to a platform, with deep links such as `/?tab=entities&entity=CM.Provisioning&service=RegisterApplication&view=sequence` |
+| `tools/dev_server.py` | Dev page and proxy to a platform, with deep links such as `/?tab=entities&entity=CM.Provisioning&service=RegisterApplication&view=sequence` or `/?tab=containers&container=CM&container-kind=Project` |
 | `tests/` | Python test of the zip layout |
 | `ui/tests/` | Node tests of the analyser, resolver, layouts and extension graph |
 
@@ -47,7 +48,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ../twx-knowledge
 .venv/bin/python -m unittest discover -s tests -t .   # zip layout test
 ```
 
-Import the zip in Composer (Import / Export, Extensions). Extension import must be enabled on the platform (notes section 7), and every import needs a higher `packageVersion` in `extension/metadata.xml` (or `build.py --version`). Open the mashup at `/Thingworx/Runtime/index.html#mashup=SE.Explorer`, or place the **Solution Explorer** widget on your own mashup. Its properties: `StartTab`, `Entity`, `EntityCollection`, `Service`, `View` (bindable in) and `SelectedEntity`, `SelectedService`, `SelectedExtension` (bindable out, with events).
+Import the zip in Composer (Import / Export, Extensions). Extension import must be enabled on the platform (notes section 7), and every import needs a higher `packageVersion` in `extension/metadata.xml` (or `build.py --version`). Open the mashup at `/Thingworx/Runtime/index.html#mashup=SE.Explorer`, or place the **Solution Explorer** widget on your own mashup. Its properties: `StartTab` (`extensions`, `containers` or `entities`), `Entity`, `EntityCollection`, `Service`, `View`, `Container`, `ContainerKind` (`Project` or `Extension`) (bindable in) and `SelectedEntity`, `SelectedService`, `SelectedExtension`, `SelectedContainer` (bindable out, with events).
 
 Develop against a platform without re-importing:
 

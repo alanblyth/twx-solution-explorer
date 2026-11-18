@@ -6,6 +6,8 @@ import type { GraphEdge, GraphNode, PlacedEdge, PlacedNode } from './graph-layou
 import { buildExtensionGraph, memberKey } from './extension-graph.ts';
 import type { ExtensionGraph, MemberEntity } from './extension-graph.ts';
 import { mapWithLimit } from './twx-api.ts';
+import { dependenciesFromDefinition } from './inheritance.ts';
+import { collectionOfType } from './models.ts';
 import type { TwxApi } from './twx-api.ts';
 
 type Status = 'idle' | 'loading' | 'done' | 'error';
@@ -30,6 +32,9 @@ type Status = 'idle' | 'loading' | 'done' | 'error';
     @if (status() === 'error') { <p class="error">{{ error() }}</p> }
     @if (incomplete() > 0) {
       <p class="warn">{{ incomplete() }} entities could not be read (not visible to you), so some dependencies may be missing.</p>
+    }
+    @if (fromDefinition() > 0) {
+      <p class="muted">{{ fromDefinition() }} disabled Thing(s) were read from their definition (template, shapes, value stream, data shapes only).</p>
     }
     @if (graph(); as built) {
       <div class="body">
@@ -61,6 +66,7 @@ type Status = 'idle' | 'loading' | 'done' | 'error';
             <h3>{{ name }}</h3>
             @if (infoFor(name); as info) {
               <p class="muted">{{ info.version }} {{ info.vendor ? '· ' + info.vendor : '' }}<br>{{ info.description }}</p>
+              <p><button (click)="showContents.emit(name)" title="Open this extension on the Projects &amp; Extensions tab">Show contents</button></p>
             }
             <p><b>Depends on</b> ({{ dependsOn(name).length }})</p>
             @for (item of dependsOn(name); track item) { <div><a (click)="select(item)">{{ item }}</a></div> } @empty { <div class="muted">nothing</div> }
@@ -97,12 +103,15 @@ type Status = 'idle' | 'loading' | 'done' | 'error';
 export class ExtensionsTabComponent implements OnInit {
   readonly api = input.required<TwxApi>();
   readonly extensionSelected = output<string>();
+  /** Open an extension on the Projects & Extensions tab. */
+  readonly showContents = output<string>();
 
   protected readonly status = signal<Status>('idle');
   protected readonly error = signal('');
   protected readonly progress = signal({ phase: '', done: 0, total: 0 });
   protected readonly graph = signal<ExtensionGraph | null>(null);
   protected readonly incomplete = signal(0);
+  protected readonly fromDefinition = signal(0);
   protected readonly hideIsolated = signal(false);
   protected readonly selectedNode = signal<string | null>(null);
   protected readonly selectedEdge = signal<string | null>(null);
@@ -115,8 +124,8 @@ export class ExtensionsTabComponent implements OnInit {
     built.edges.forEach((edge) => { connected.add(edge.from); connected.add(edge.to); });
     const nodes: GraphNode[] = built.packages
       .filter((item) => !this.hideIsolated() || connected.has(item.name))
-      .map((item) => ({ id: item.name, label: item.name, sublabel: item.version, kind: 'package' }));
-    built.missing.forEach((name) => nodes.push({ id: name, label: name, sublabel: 'not installed', kind: 'absent' }));
+      .map((item) => ({ id: item.name, label: item.name, sublabel: item.version, kind: 'package', shape: 'folder' as const }));
+    built.missing.forEach((name) => nodes.push({ id: name, label: name, sublabel: 'not installed', kind: 'absent', shape: 'folder' }));
     const edges: GraphEdge[] = built.edges.map((edge) => ({
       from: edge.from, to: edge.to, label: edge.links.length ? String(edge.links.length) : undefined, kind: edge.links.length ? 'used' : 'declared',
     }));
@@ -156,6 +165,7 @@ export class ExtensionsTabComponent implements OnInit {
     this.status.set('loading');
     this.error.set('');
     this.incomplete.set(0);
+    this.fromDefinition.set(0);
     this.selectedEdge.set(null);
     try {
       const api = this.api();
@@ -172,14 +182,22 @@ export class ExtensionsTabComponent implements OnInit {
       const outgoing = new Map<string, MemberEntity[]>();
       done = 0;
       let unreadable = 0;
+      let readFromDefinition = 0;
       this.progress.set({ phase: 'Reading dependencies', done, total: everyMember.length });
       await mapWithLimit(everyMember, 8, async (member) => {
-        const used = await api.dependencies('out', member.type, member.name);
-        if (used) outgoing.set(memberKey(member), used);
-        else unreadable += 1;
+        const lookup = await api.dependencyLookup('out', member.type, member.name);
+        if (lookup.status === 'ok') outgoing.set(memberKey(member), lookup.items);
+        else if (lookup.status === 'not-enabled') {
+          // A disabled Thing cannot run its dependency services; its definition still names its template, shapes and so on.
+          const collection = collectionOfType(member.type);
+          const body = await api.entity(collection, member.name).catch(() => null);
+          if (body) { outgoing.set(memberKey(member), dependenciesFromDefinition(collection, body)); readFromDefinition += 1; }
+          else unreadable += 1;
+        } else unreadable += 1;
         this.progress.update((value) => ({ ...value, done: ++done }));
       }, () => this.cancelled);
       this.incomplete.set(this.cancelled ? 0 : unreadable);
+      this.fromDefinition.set(this.cancelled ? 0 : readFromDefinition);
       this.graph.set(buildExtensionGraph(packages, members, outgoing));
       this.status.set('done');
     } catch (failure) {

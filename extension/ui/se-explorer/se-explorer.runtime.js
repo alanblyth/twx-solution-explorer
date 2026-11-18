@@ -26,7 +26,7 @@ TW.Runtime.Widgets["se-explorer"] = function () {
     var element = null;
 
     // widget property -> element attribute
-    var ATTRIBUTES = { StartTab: "start-tab", Entity: "entity", EntityCollection: "entity-collection", Service: "service", View: "view" };
+    var ATTRIBUTES = { StartTab: "start-tab", Entity: "entity", EntityCollection: "entity-collection", Service: "service", View: "view", Container: "container", ContainerKind: "container-kind" };
 
     this.renderHtml = function () {
         return '<div class="widget-content widget-se-explorer" style="width:100%;height:100%"></div>';
@@ -49,6 +49,7 @@ TW.Runtime.Widgets["se-explorer"] = function () {
         element.addEventListener("entitySelected", function (e) { raise(e, "SelectedEntity", "entitySelected"); });
         element.addEventListener("serviceSelected", function (e) { raise(e, "SelectedService", "serviceSelected"); });
         element.addEventListener("extensionSelected", function (e) { raise(e, "SelectedExtension", "extensionSelected"); });
+        element.addEventListener("containerSelected", function (e) { raise(e, "SelectedContainer", "containerSelected"); });
         thisWidget.jqElement[0].appendChild(element);
         window.__seLoadElements().catch(function (error) { console.error(error); });
     };
