@@ -11,7 +11,7 @@ from twxlab import entities
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENTITIES = os.path.join(HERE, "Entities")
 PROJECT = "SolutionExplorer"
-PACKAGE_VERSION = "0.2.0"
+PACKAGE_VERSION = "0.2.1"
 
 
 def explorer_mashup():
