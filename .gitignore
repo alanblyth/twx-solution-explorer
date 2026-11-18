@@ -1,0 +1,9 @@
+.venv/
+node_modules/
+ui/dist/
+ui/out-tsc/
+ui/.angular/
+build/
+.DS_Store
+__pycache__/
+*.egg-info/
