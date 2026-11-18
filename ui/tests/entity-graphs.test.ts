@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildCallGraph, buildInheritanceGraph, callEdgeKey, DERIVED_LIMIT, derivedEntities, inheritanceNames, layoutInheritance, missingCodeReason,
+  buildCallGraph, buildInheritanceGraph, callEdgeKey, DERIVED_LIMIT, DERIVED_THINGS_SHOWN, derivedColumns, derivedEntities, derivedThingCount,
+  inheritanceNames, layoutInheritance, missingCodeReason, visibleDerived,
 } from '../apps/explorer/src/app/entity-graphs.ts';
 import { layoutGraph } from '../apps/explorer/src/app/graph-layout.ts';
 import type { CallTree } from '../apps/explorer/src/app/models.ts';
@@ -26,14 +27,28 @@ test('the inheritance graph runs parent to child with shapes beside their level'
 });
 
 test('a template shows what derives from it, at most the limit plus a "more" node', () => {
-  const related = Array.from({ length: DERIVED_LIMIT + 5 }, (_, index) => ({ name: `T${String(index).padStart(2, '0')}`, type: index % 2 ? 'Thing' : 'ThingTemplate' }));
+  const related = Array.from({ length: 25 }, (_, index) => ({ name: `T${String(index).padStart(2, '0')}`, type: index % 2 ? 'Thing' : 'ThingTemplate' }));
   related.push({ name: 'Ignored', type: 'Mashup' });
-  const graph = buildInheritanceGraph({ name: 'Pump.TT', collection: 'ThingTemplates' }, levels.slice(1), related, new Set(['T01']));
+  const graph = buildInheritanceGraph({ name: 'Pump.TT', collection: 'ThingTemplates' }, levels.slice(1), related, new Set(['T01']), { showAllThings: true, limit: 20 });
   const derived = graph.nodes.filter((node) => node.id.startsWith('derived:') && node.id !== 'derived:more');
-  assert.equal(derived.length, DERIVED_LIMIT);
+  assert.equal(derived.length, 20);
   assert.equal(graph.nodes.find((node) => node.id === 'derived:more')?.label, '+5 more');
   assert.equal(derived[0].sublabel, 'ThingTemplate', 'templates come first');
   assert.equal(graph.nodes.find((node) => node.id === 'derived:Thing:T01')?.shape, 'cylinder');
+  assert.ok(DERIVED_LIMIT >= 200, 'the default cap allows a few hundred');
+});
+
+test('more than ten derived Things are hidden until asked for; templates always show', () => {
+  const things = Array.from({ length: DERIVED_THINGS_SHOWN + 1 }, (_, index) => ({ name: `Pump${index}`, type: 'Thing' }));
+  const related = [...things, { name: 'Child.TT', type: 'ThingTemplate' }];
+  assert.equal(derivedThingCount(related), DERIVED_THINGS_SHOWN + 1);
+  assert.deepEqual(visibleDerived(related, false).map((item) => item.name), ['Child.TT']);
+  assert.equal(visibleDerived(related, true).length, DERIVED_THINGS_SHOWN + 2);
+  assert.equal(visibleDerived(related.slice(1), false).length, DERIVED_THINGS_SHOWN + 1, 'ten Things still show');
+  const hidden = buildInheritanceGraph({ name: 'Pump.TT', collection: 'ThingTemplates' }, levels.slice(1), related, new Set());
+  assert.equal(hidden.nodes.filter((node) => node.id.startsWith('derived:')).length, 1);
+  assert.equal(derivedColumns(3), 3);
+  assert.equal(derivedColumns(300), 12);
 });
 
 test('a shape shows the templates and Things that implement it', () => {

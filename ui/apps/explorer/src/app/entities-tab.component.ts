@@ -14,7 +14,9 @@ import type { TwxApi } from './twx-api.ts';
 import { shapeForType } from './node-shapes.ts';
 import { dependenciesFromDefinition, readInheritance } from './inheritance.ts';
 import type { InheritanceLevel } from './inheritance.ts';
-import { buildCallGraph, buildInheritanceGraph, callEdgeKey, inheritanceNames, layoutInheritance, missingCodeReason } from './entity-graphs.ts';
+import {
+  buildCallGraph, buildInheritanceGraph, callEdgeKey, DERIVED_LIMIT, DERIVED_THINGS_SHOWN, derivedThingCount, inheritanceNames, layoutInheritance, missingCodeReason,
+} from './entity-graphs.ts';
 
 const COLLECTIONS = ['Things', 'ThingTemplates', 'ThingShapes', 'DataShapes', 'Mashups', 'Projects'];
 const SERVICE_COLLECTIONS = new Set(['Things', 'ThingTemplates', 'ThingShapes']);
@@ -67,19 +69,30 @@ const KIND_TEXT: Record<string, string> = {
 
           @if (subTab() === 'dependencies') {
             <div class="deps">
-              @if (hasInheritance()) {
-                <div class="inherit" [class.wide]="dependencyGraph().nodes.length <= 1">
-                  <h4>Inheritance</h4>
+              <div class="graph">
+                <div class="toolbar sub-tabs">
+                  @if (hasInheritance()) {
+                    <button [class.primary]="dependencyView() === 'inheritance'" (click)="chosenDependencyView.set('inheritance')">Inheritance</button>
+                    <button [class.primary]="dependencyView() === 'other'" (click)="chosenDependencyView.set('other')"
+                      title="The template chain, shapes and derived entities are in the inheritance graph">Other dependencies</button>
+                  } @else {
+                    <b>Dependencies</b>
+                  }
+                  @if (dependencyView() === 'inheritance' && derivedThings() > thingsShownLimit) {
+                    <span class="spacer"></span>
+                    <label class="muted"><input type="checkbox" [checked]="showDerivedThings()" (change)="showDerivedThings.set(!showDerivedThings())"/> Show {{ derivedThings() }} Things</label>
+                    @if (showDerivedThings() && derivedThings() > derivedLimit) { <span class="muted">(first {{ derivedLimit }} drawn, all in the Used by list)</span> }
+                  }
+                </div>
+                @if (dependencyView() === 'inheritance') {
                   @if (inheritanceGraph().nodes.length) {
                     <se-graph-view [graph]="inheritanceGraph()" [selectedNode]="inheritanceSelf()" (nodeClicked)="openInheritance($event)"/>
                   } @else if (!loading()) { <p class="muted">No inheritance to show.</p> }
-                </div>
-              }
-              <div class="graph">
-                <h4 [title]="hasInheritance() ? 'The template chain, shapes and derived entities are in the inheritance graph' : ''">{{ hasInheritance() ? 'Other dependencies' : 'Dependencies' }}</h4>
-                @if (dependencyGraph().nodes.length > 1) {
-                  <se-graph-view [graph]="dependencyGraph()" [selectedNode]="'self'" (nodeClicked)="openDependency($event)"/>
-                } @else if (!loading()) { <p class="muted">No other direct dependencies.</p> }
+                } @else {
+                  @if (dependencyGraph().nodes.length > 1) {
+                    <se-graph-view [graph]="dependencyGraph()" [selectedNode]="'self'" (nodeClicked)="openDependency($event)"/>
+                  } @else if (!loading()) { <p class="muted">No {{ hasInheritance() ? 'other ' : '' }}direct dependencies.</p> }
+                }
               </div>
               <div class="lists">
                 @if (loading()) { <p class="muted">Loading…</p> }
@@ -128,9 +141,9 @@ const KIND_TEXT: Record<string, string> = {
                           <se-sequence-view [tree]="root" (messageHovered)="hoverMessage($event)"/>
                         }
                       </div>
-                      <div class="code-panel">
+                      <div class="code-panel" [class.collapsed]="codeCollapsed()">
                         @let panel = codePanel();
-                        <se-code-view [code]="panel.code" [language]="panel.language" [highlighted]="panel.lines" [title]="panel.title" [reason]="panel.reason"/>
+                        <se-code-view [code]="panel.code" [language]="panel.language" [highlighted]="panel.lines" [title]="panel.title" [reason]="panel.reason" [(collapsed)]="codeCollapsed"/>
                       </div>
                     </div>
                     @if (selectedNodeInfo(); as info) { <p class="node-info"><b>{{ info.title }}</b> — {{ info.text }}</p> }
@@ -160,17 +173,17 @@ const KIND_TEXT: Record<string, string> = {
     .detail { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
     .title h2 { margin: 0; font-size: 16px; }
     .deps { flex: 1; display: flex; gap: 12px; min-height: 0; margin-top: 8px; }
-    .graph, .inherit { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-    .graph { min-width: 220px; } .inherit { flex: 0 1 38%; } .inherit.wide { flex: 1 1 70%; } .graph h4, .inherit h4 { margin: 0 0 2px; }
-    .graph se-graph-view, .inherit se-graph-view { flex: 1; min-height: 0; }
+    .graph { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+    .sub-tabs { padding-bottom: 4px; } .graph se-graph-view { flex: 1; min-height: 0; }
     .lists { width: 260px; overflow: auto; }
-    .lists h4 { margin: 8px 0 4px; } .group { margin-bottom: 6px; line-height: 1.8; } .group a { margin-left: 8px; }
+    .lists h4 { margin: 8px 0 4px; } .group { margin-bottom: 6px; line-height: 1.8; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; } .group .pill { margin-right: 2px; }
     a { color: #1565c0; cursor: pointer; text-decoration: underline; }
     .services { flex: 1; display: flex; gap: 12px; min-height: 0; margin-top: 8px; }
     .svc-list { width: 250px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
     .trace { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; gap: 6px; }
     .view-row { flex: 1; min-height: 0; display: flex; gap: 10px; }
     .view { flex: 1.5; min-width: 0; min-height: 0; } .code-panel { flex: 1; min-width: 300px; min-height: 0; }
+    .code-panel.collapsed { flex: 0 0 30px; min-width: 30px; }
     .summary { margin: 0; }
     .pill.own { background: #d6e8fb; color: #0f4f9a; }
     .node-info { margin: 0; padding: 6px 8px; background: #f3f7fb; border-radius: 4px; }
@@ -200,6 +213,13 @@ export class EntitiesTabComponent {
   protected readonly disabled = signal(false);
   protected readonly loadError = signal<string | null>(null);
   protected readonly inheritance = signal<InheritanceLevel[]>([]);
+  /** The Dependencies sub-tab picked; an entity without inheritance always shows its other dependencies. */
+  protected readonly chosenDependencyView = signal<'inheritance' | 'other'>('inheritance');
+  protected readonly showDerivedThings = signal(false);
+  protected readonly thingsShownLimit = DERIVED_THINGS_SHOWN;
+  protected readonly derivedLimit = DERIVED_LIMIT;
+  /** Collapsed code view, kept while the tab is open. */
+  protected readonly codeCollapsed = signal(false);
   protected readonly dataThings = signal<Set<string>>(new Set());
   protected readonly outgoing = signal<MemberEntity[]>([]);
   protected readonly incoming = signal<MemberEntity[]>([]);
@@ -238,10 +258,16 @@ export class EntitiesTabComponent {
     return name ? `level:${name}` : null;
   });
 
+  protected readonly dependencyView = computed(() => (this.hasInheritance() ? this.chosenDependencyView() : 'other'));
+  protected readonly derivedThings = computed(() => {
+    const collection = this.selected()?.collection;
+    return collection === 'ThingTemplates' || collection === 'ThingShapes' ? derivedThingCount(this.incoming()) : 0;
+  });
+
   protected readonly inheritanceGraph = computed(() => {
     const entity = this.selected();
     if (!entity || !this.hasInheritance() || this.loading()) return EMPTY_GRAPH;
-    const graph = buildInheritanceGraph({ name: entity.name, collection: entity.collection }, this.inheritance(), this.incoming(), this.dataThings());
+    const graph = buildInheritanceGraph({ name: entity.name, collection: entity.collection }, this.inheritance(), this.incoming(), this.dataThings(), { showAllThings: this.showDerivedThings() });
     return layoutInheritance(graph, this.inheritanceSelf() ?? '');
   });
 
@@ -354,6 +380,7 @@ export class EntitiesTabComponent {
     this.outgoing.set([]);
     this.incoming.set([]);
     this.inheritance.set([]);
+    this.showDerivedThings.set(false);
     this.notVisible.set(false);
     this.disabled.set(false);
     this.loadError.set(null);
