@@ -24,6 +24,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPOSITORY_ROOT / "tools"))
+from single_write_http import SingleWriteConnection   # noqa: E402
+
 WORK_FOLDER = REPOSITORY_ROOT / "tools" / "perf" / ".work"
 PLATFORM_CONTAINER = "twx-test-platform-1"
 POSTGRES_CONTAINER = "twx-test-postgresql-1"
@@ -62,7 +65,8 @@ class Platform:
     def _connection(self):
         connection = getattr(self.local, "connection", None)
         if connection is None:
-            connection = http.client.HTTPConnection(self.host, self.port, timeout=600)
+            # One write per request, as the browser sends it; plain http.client added 40 ms to every POST on Windows.
+            connection = SingleWriteConnection(self.host, self.port, timeout=600)
             self.local.connection = connection
         return connection
 

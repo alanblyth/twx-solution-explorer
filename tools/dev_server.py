@@ -8,6 +8,10 @@ every request is sent with the Administrator's credentials, so never expose the 
 """
 import argparse, base64, http.server, os, urllib.error, urllib.parse, urllib.request
 from twxlab import client
+from single_write_http import SingleWriteHandler
+
+# Forwards each request in one write: plain urllib added 40 ms to every proxied POST to a platform in Docker on Windows.
+OPENER = urllib.request.build_opener(SingleWriteHandler)
 
 BUNDLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ui", "dist", "explorer", "main.js")
 PAGE = """<!doctype html><meta charset="utf-8"><title>Solution Explorer (dev)</title>
@@ -49,7 +53,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         session = Handler.session_cookie
         request.add_header(*(("Cookie", session) if session else ("Authorization", Handler.authorization)))
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
+            with OPENER.open(request, timeout=120) as response:
                 Handler.remember_session(response.headers.get("Set-Cookie"))
                 self.reply(response.status, response.read(), response.headers.get("Content-Type", "application/json"))
         except urllib.error.HTTPError as error:
@@ -66,7 +70,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 request.add_header(name, self.headers[name])
         request.add_header("Authorization", Handler.authorization)
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
+            with OPENER.open(request, timeout=120) as response:
                 Handler.remember_session(response.headers.get("Set-Cookie"))
                 self.reply(response.status, response.read(), response.headers.get("Content-Type", "application/json"))
         except urllib.error.HTTPError as error:
