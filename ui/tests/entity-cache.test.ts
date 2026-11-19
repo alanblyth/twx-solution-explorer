@@ -71,6 +71,39 @@ test('the cache keeps the most recently used bodies only', async () => {
   }
 });
 
+test('a fresh read of a body that is not cached adds nothing and pushes nothing out', async () => {
+  const platform = fakePlatform((path) => ({ status: 200, body: { name: path } }));
+  try {
+    const api = new TwxApi({ baseUrl: 'http://twx/Thingworx' });
+    for (let index = 0; index < ENTITY_CACHE_SIZE; index++) await api.entity('Things', `Browsed${index}`);
+    const before = platform.requests.length;
+    for (let index = 0; index < ENTITY_CACHE_SIZE * 2; index++) await api.entity('Things', `Scanned${index}`, { fresh: true });
+    assert.equal(platform.requests.length, before + ENTITY_CACHE_SIZE * 2);
+    await api.entity('Things', 'Browsed0');
+    assert.equal(platform.requests.length, before + ENTITY_CACHE_SIZE * 2, 'the browsed bodies are still cached');
+    await api.entity('Things', 'Scanned0');
+    assert.equal(platform.requests.length, before + ENTITY_CACHE_SIZE * 2 + 1, 'a scanned body was not kept');
+  } finally {
+    platform.restore();
+  }
+});
+
+test('a rescan of extension packages reads their bodies again', async () => {
+  let version = '1.0.0';
+  const platform = fakePlatform((path) => (path === 'ExtensionPackages'
+    ? { status: 200, body: { rows: [{ name: 'LabPkg' }] } }
+    : { status: 200, body: { packageVersion: version, dependsOn: '' } }));
+  try {
+    const api = new TwxApi({ baseUrl: 'http://twx/Thingworx' });
+    await api.entity('ExtensionPackages', 'LabPkg');   // cached by another view
+    assert.equal((await api.packages())[0].version, '1.0.0');
+    version = '1.1.0';
+    assert.equal((await api.packages())[0].version, '1.1.0');
+  } finally {
+    platform.restore();
+  }
+});
+
 test('a definition names what GetOutgoingDependencies lists for a Thing', () => {
   const found = dependenciesFromDefinition('Things', {
     thingTemplate: 'Stream', implementedShapes: {}, valueStream: '', homeMashup: 'Home',

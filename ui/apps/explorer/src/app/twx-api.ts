@@ -59,14 +59,15 @@ export class TwxApi {
 
   /**
    * Entity JSON: `GET /<collection>/<name>`, null when it is missing or not visible. Shared by every tab through a small
-   * least-recently-used cache, so a template read by one view is not read again by the next. `fresh` reads it again and
-   * replaces the cached copy (a scan reads what is there now); a failed read is not kept.
+   * least-recently-used cache, so a template read by one view is not read again by the next. `fresh` reads it again (a
+   * scan reads what is there now) and replaces a copy that is cached, but does not add one: a scan of thousands of
+   * members would otherwise push out every body the user is browsing. A failed read is not kept.
    */
   entity(collection: string, name: string, options: { fresh?: boolean } = {}): Promise<any | null> {
     const key = `${collection}/${name}`;
     const cached = this.bodies.get(key);
-    this.bodies.delete(key);
     if (cached && !options.fresh) {
+      this.bodies.delete(key);
       this.bodies.set(key, cached);   // most recently used last
       return cached;
     }
@@ -74,7 +75,9 @@ export class TwxApi {
       if (error instanceof NotVisibleError) return null;
       throw error;
     });
+    if (options.fresh && !cached) return body;
     body.catch(() => { if (this.bodies.get(key) === body) this.bodies.delete(key); });
+    this.bodies.delete(key);
     this.bodies.set(key, body);
     while (this.bodies.size > ENTITY_CACHE_SIZE) this.bodies.delete(this.bodies.keys().next().value as string);
     return body;
@@ -106,7 +109,8 @@ export class TwxApi {
   async packages(): Promise<PackageInfo[]> {
     const list = await this.request('GET', 'ExtensionPackages');
     const names: string[] = (list?.rows ?? []).map((row: any) => row.name);
-    const details = await mapWithLimit(names, 6, async (name) => this.entity('ExtensionPackages', name));
+    // Fresh: a rescan after an upgrade must show the new version and dependsOn.
+    const details = await mapWithLimit(names, 6, async (name) => this.entity('ExtensionPackages', name, { fresh: true }));
     return names.map((name, index) => {
       const body = details[index] ?? {};
       return { name, version: body.packageVersion ?? '', vendor: body.vendor ?? '', description: body.description ?? '', dependsOn: parseDependsOn(body.dependsOn) };

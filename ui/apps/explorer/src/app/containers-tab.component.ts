@@ -398,7 +398,8 @@ export class ContainersTabComponent {
       let analysisMilliseconds = 0;
 
       // Each member's body is read at most once and not kept: a big project has thousands of bodies of about 230 kB.
-      // The read is fresh (a scan shows the platform as it is now) and refreshes the shared cache as it goes.
+      // The read is fresh (a scan shows the platform as it is now): it refreshes a body the shared cache already holds and
+      // adds none, so the scan neither keeps thousands of bodies nor pushes out what the Entities tab is showing.
       const readBody = (member: MemberEntity): Promise<any | null> =>
         api.entity(collectionOfType(member.type), member.name, { fresh: true }).catch(() => null);
       const outgoing = new Map<string, MemberEntity[]>();
