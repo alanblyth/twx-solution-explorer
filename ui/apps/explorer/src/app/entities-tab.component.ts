@@ -52,6 +52,7 @@ const KIND_TEXT: Record<string, string> = {
           @if (notVisible()) { <p class="warn">This entity could not be read: it does not exist or is not visible to you.</p> }
           @if (disabled()) { <p class="warn">This Thing is disabled: dependencies come from its definition; what uses it is unknown.</p> }
           @if (loadError()) { <p class="warn error">Could not load this entity: {{ loadError() }}</p> }
+          @for (problem of lookupProblems(); track problem) { <p class="warn">{{ problem }}</p> }
 
           @if (subTab() === 'dependencies') {
             <div class="deps">
@@ -229,6 +230,8 @@ export class EntitiesTabComponent {
   protected readonly notVisible = signal(false);
   protected readonly disabled = signal(false);
   protected readonly loadError = signal<string | null>(null);
+  /** Dependency lookups the platform failed for this entity, with its message; the rest of the entity still shows. */
+  protected readonly lookupProblems = signal<string[]>([]);
   protected readonly inheritance = signal<InheritanceLevel[]>([]);
   /** The Dependencies sub-tab picked; an entity without inheritance always shows its other dependencies. */
   protected readonly chosenDependencyView = signal<'inheritance' | 'other'>('inheritance');
@@ -386,6 +389,7 @@ export class EntitiesTabComponent {
     this.services.set([]);
     this.outgoing.set([]);
     this.incoming.set([]);
+    this.lookupProblems.set([]);
     this.inheritance.set([]);
     this.showDerivedThings.set(false);
     this.notVisible.set(false);
@@ -417,6 +421,10 @@ export class EntitiesTabComponent {
       this.services.set(services);
       this.inheritance.set(levels);
       this.notVisible.set(body === null);
+      this.lookupProblems.set([
+        ...(outgoing.status === 'failed' ? [`The platform could not list what this uses (${outgoing.reason}).`] : []),
+        ...(incoming.status === 'failed' ? [`The platform could not list what uses this (${incoming.reason}).`] : []),
+      ]);
       endOpen({ outgoing: outgoing.items.length, incoming: incoming.items.length });
     } catch (error) {
       if (this.selected() === row) this.loadError.set(error instanceof Error ? error.message : String(error));
