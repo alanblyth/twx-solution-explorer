@@ -136,8 +136,9 @@ export class ExtensionsTabComponent implements OnInit {
     }));
     built.packages.forEach((item) => item.dependsOn.filter((name) => built.missing.includes(name)).forEach((name) => edges.push({ from: item.name, to: name, kind: 'declared' })));
     // Right to left: an edge points from an extension to what it depends on, so base layers sit on the left and the
-    // extensions that build on them spread out to the right.
-    return layoutGraph(nodes, edges, 'RL');
+    // extensions that build on them spread out to the right. Every extension that depends on no other (unconnected ones
+    // included) shares the leftmost column.
+    return layoutGraph(nodes, edges, 'RL', [], { alignSinks: true });
   });
 
   protected readonly selectedEdgeData = computed(() => {

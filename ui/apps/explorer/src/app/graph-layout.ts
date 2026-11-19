@@ -44,15 +44,28 @@ export function edgeKey(edge: GraphEdge): string {
   return `${edge.from}\u0000${edge.to}\u0000${edge.kind ?? ''}`;
 }
 
+export interface LayoutOptions {
+  /**
+   * Put every node with no outgoing edge in the last rank (with 'RL', the leftmost column), unconnected nodes included.
+   * Dagre otherwise ranks such a node next to whatever points at it, and an unconnected node in the first rank.
+   */
+  alignSinks?: boolean;
+}
+
+/** A hidden node the sinks are tied to when `alignSinks` is set; never drawn. */
+const SINK_ANCHOR = '\u0000sink-anchor';
+
 /** Layered layout (Sugiyama, through dagre), with optional groups. Edges to unknown nodes are dropped. */
-export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'RL' | 'TB' | 'BT' = 'LR', groups: GraphGroup[] = []): PlacedGraph {
+export function layoutGraph(
+  nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'RL' | 'TB' | 'BT' = 'LR', groups: GraphGroup[] = [], options: LayoutOptions = {},
+): PlacedGraph {
   const end = perfStart('layout', { nodes: nodes.length, edges: edges.length, groups: groups.length });
-  const placed = placeGraph(nodes, edges, direction, groups);
+  const placed = placeGraph(nodes, edges, direction, groups, options);
   end();
   return placed;
 }
 
-function placeGraph(nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'RL' | 'TB' | 'BT', groups: GraphGroup[]): PlacedGraph {
+function placeGraph(nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'RL' | 'TB' | 'BT', groups: GraphGroup[], options: LayoutOptions): PlacedGraph {
   const graph = new dagre.graphlib.Graph({ multigraph: true, compound: groups.length > 0 });
   graph.setGraph({ rankdir: direction, nodesep: 26, ranksep: 70, marginx: 20, marginy: 28 });
   graph.setDefaultEdgeLabel(() => ({}));
@@ -75,6 +88,15 @@ function placeGraph(nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'R
   for (const edge of kept) {
     graph.setEdge(edge.from, edge.to, { width: edge.label ? textWidth(edge.label) + 8 : 0, height: edge.label ? 16 : 0, labelpos: 'c' }, edge.kind || 'link');
   }
+  const anchored = Boolean(options.alignSinks) && nodes.length > 0;
+  if (anchored) {
+    // Each sink gets a heavy edge to one hidden node, so the ranker keeps them all one rank before it: one column.
+    const hasOutgoing = new Set(kept.map((edge) => edge.from));
+    graph.setNode(SINK_ANCHOR, { width: 1, height: 1 });
+    for (const node of nodes) {
+      if (!hasOutgoing.has(node.id)) graph.setEdge(node.id, SINK_ANCHOR, { width: 0, height: 0, weight: 1000, minlen: 1 }, 'anchor');
+    }
+  }
   dagre.layout(graph);
   const placedNodes = nodes.map((node) => {
     const placed = graph.node(node.id);
@@ -91,7 +113,41 @@ function placeGraph(nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'R
     return { ...group, x: placed.x, y: placed.y, width: placed.width, height: placed.height };
   });
   const dimensions = graph.graph();
-  return { nodes: placedNodes, edges: placedEdges, groups: placedGroups, width: dimensions.width ?? 0, height: dimensions.height ?? 0 };
+  const placedGraph = { nodes: placedNodes, edges: placedEdges, groups: placedGroups, width: dimensions.width ?? 0, height: dimensions.height ?? 0 };
+  return anchored ? withoutAnchorSpace(placedGraph) : placedGraph;
+}
+
+/** Moves a graph laid out with the hidden anchor back to the margins, so the anchor's empty rank leaves no gap. */
+function withoutAnchorSpace(graph: PlacedGraph): PlacedGraph {
+  const margin = { x: 20, y: 28 };
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  const include = (x: number, y: number, halfWidth = 0, halfHeight = 0): void => {
+    left = Math.min(left, x - halfWidth);
+    right = Math.max(right, x + halfWidth);
+    top = Math.min(top, y - halfHeight);
+    bottom = Math.max(bottom, y + halfHeight);
+  };
+  for (const node of graph.nodes) include(node.x, node.y, node.width / 2, node.height / 2);
+  for (const group of graph.groups) include(group.x, group.y, group.width / 2, group.height / 2);
+  for (const edge of graph.edges) {
+    for (const point of edge.points) include(point.x, point.y);
+    include(edge.labelX, edge.labelY);
+  }
+  if (!Number.isFinite(left)) return graph;
+  const shiftX = margin.x - left;
+  const shiftY = margin.y - top;
+  return {
+    nodes: graph.nodes.map((node) => ({ ...node, x: node.x + shiftX, y: node.y + shiftY })),
+    groups: graph.groups.map((group) => ({ ...group, x: group.x + shiftX, y: group.y + shiftY })),
+    edges: graph.edges.map((edge) => ({
+      ...edge, points: edge.points.map((point) => ({ x: point.x + shiftX, y: point.y + shiftY })), labelX: edge.labelX + shiftX, labelY: edge.labelY + shiftY,
+    })),
+    width: right - left + margin.x * 2,
+    height: bottom - top + margin.y * 2,
+  };
 }
 
 /** A smooth SVG path through the edge points, ending on the last point (the arrow head). */
