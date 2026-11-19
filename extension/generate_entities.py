@@ -12,7 +12,7 @@ sys.path.insert(0, HERE)
 import thingworx_package as entities   # noqa: E402
 ENTITIES = os.path.join(HERE, "Entities")
 PROJECT = "SolutionExplorer"
-PACKAGE_VERSION = "0.2.14"
+PACKAGE_VERSION = "0.2.15"
 
 
 def explorer_mashup():
