@@ -3,6 +3,7 @@ import type { EntityRow, PackageInfo } from './models.ts';
 import { parseDependsOn } from './extension-graph.ts';
 import type { MemberEntity } from './extension-graph.ts';
 import { substringMask } from './used-by.ts';
+import { entityKey, mashupContentLinks, mashupsUsing } from './mashup-content.ts';
 
 /** The user may not see or use the entity (HTTP 403 or 404). Common on a platform with organisational-unit visibility. */
 export class NotVisibleError extends Error {}
@@ -120,6 +121,52 @@ export class TwxApi {
   /** Forgets every cached entity body (the user asked to read the platform again). */
   forgetEntities(): void {
     this.bodies.clear();
+    this.contentUsage = null;
+  }
+
+  /** Names of the widgets that are entities (extension widgets). Empty when the collection cannot be listed. */
+  async widgetEntityNames(): Promise<Set<string>> {
+    try {
+      return new Set((await this.list('Widgets')).map((row) => row.name));
+    } catch {
+      return new Set();
+    }
+  }
+
+  private contentUsage: Promise<Map<string, string[]>> | null = null;
+
+  /**
+   * Which mashups use each entity, read from every mashup's content once (the platform's dependency services leave it
+   * out). The bodies are read fresh and not kept in the entity cache; the map is kept until Reload.
+   */
+  mashupsUsingEntities(): Promise<Map<string, string[]>> {
+    if (!this.contentUsage) {
+      const usage = (async () => {
+        const [widgets, mashups] = await Promise.all([this.widgetEntityNames(), this.list('Mashups')]);
+        const names = mashups.map((row) => row.name);
+        const bodies = await mapWithLimit(names, 6, (name) => this.entity('Mashups', name, { fresh: true }).catch(() => null));
+        return mashupsUsing(names.map((name, index) => ({ name, body: bodies[index] })), widgets);
+      })();
+      usage.catch(() => { if (this.contentUsage === usage) this.contentUsage = null; });
+      this.contentUsage = usage;
+    }
+    return this.contentUsage;
+  }
+
+  /**
+   * Links the dependency services leave out, read from mashup content: for a mashup (`out`), the widgets, data sources
+   * and mashups it uses; for any entity (`in`), the mashups that use it. `body` is the mashup's JSON when the caller has
+   * read it already. Empty for a non-mashup going out.
+   */
+  async contentLinks(direction: 'out' | 'in', type: string, name: string, body?: any): Promise<MemberEntity[]> {
+    if (direction === 'out' && type === 'Mashup') {
+      const mashupBody = body ?? await this.entity('Mashups', name, { fresh: true }).catch(() => null);
+      return mashupBody ? mashupContentLinks(mashupBody, await this.widgetEntityNames()) : [];
+    }
+    if (direction === 'in') {
+      return ((await this.mashupsUsingEntities()).get(entityKey(type, name)) ?? []).map((mashup) => ({ name: mashup, type: 'Mashup' }));
+    }
+    return [];
   }
 
   private readonly listings = new Map<string, Promise<EntityRow[]>>();

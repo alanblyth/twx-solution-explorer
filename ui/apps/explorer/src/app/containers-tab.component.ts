@@ -12,6 +12,7 @@ import { implementationsOf } from './call-resolver.ts';
 import { analyzeScript, flattenCalls } from './js-analyzer.ts';
 import { collectionOfType } from './models.ts';
 import { mapWithLimit, unreadableEntity } from './twx-api.ts';
+import { withLinks } from './mashup-content.ts';
 import { containerMembersFor, dedupeEntities } from './container-members.ts';
 import type { ContainerKind } from './container-members.ts';
 import type { TwxApi, UnreadableEntity } from './twx-api.ts';
@@ -423,7 +424,8 @@ export class ContainersTabComponent {
           }
         } else {
           const lookup = await api.dependencyLookup('out', member.type, member.name);
-          if (lookup.status === 'ok') outgoing.set(key, lookup.items);
+          // A mashup's widgets are missing from GetOutgoingDependencies; its content names them (mashup-content.ts).
+          if (lookup.status === 'ok') outgoing.set(key, withLinks(lookup.items, await api.contentLinks('out', member.type, member.name)));
           else if (lookup.status === 'not-enabled') {
             body = await readBody(member);
             if (body) { outgoing.set(key, dependenciesFromDefinition(collectionOfType(member.type), body)); readFromDefinition += 1; }
@@ -436,7 +438,7 @@ export class ContainersTabComponent {
         }
         if (incoming) {
           const users = await api.dependencyLookup('in', member.type, member.name);
-          if (users.status === 'ok') incoming.set(key, users.items);
+          if (users.status === 'ok') incoming.set(key, withLinks(users.items, await api.contentLinks('in', member.type, member.name)));
         }
         if (calls && wantsScripts && visible) {
           if (body === undefined) body = await readBody(member);

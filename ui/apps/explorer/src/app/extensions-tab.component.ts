@@ -7,6 +7,7 @@ import { buildExtensionGraph, memberKey } from './extension-graph.ts';
 import type { ExtensionGraph, MemberEntity } from './extension-graph.ts';
 import { mapWithLimit, unreadableEntity } from './twx-api.ts';
 import { dependenciesFromDefinition } from './inheritance.ts';
+import { withLinks } from './mashup-content.ts';
 import { collectionOfType } from './models.ts';
 import type { TwxApi, UnreadableEntity } from './twx-api.ts';
 import { perfStart, perfSync } from './perf.ts';
@@ -196,7 +197,8 @@ export class ExtensionsTabComponent implements OnInit {
       this.progress.set({ phase: 'Reading dependencies', done, total: everyMember.length });
       await mapWithLimit(everyMember, 8, async (member) => {
         const lookup = await api.dependencyLookup('out', member.type, member.name);
-        if (lookup.status === 'ok') outgoing.set(memberKey(member), lookup.items);
+        // A mashup's widgets are missing from GetOutgoingDependencies; its content names them (mashup-content.ts).
+        if (lookup.status === 'ok') outgoing.set(memberKey(member), withLinks(lookup.items, await api.contentLinks('out', member.type, member.name)));
         else if (lookup.status === 'not-enabled') {
           // A disabled Thing cannot run its dependency services; its definition still names its template, shapes and so on.
           const collection = collectionOfType(member.type);

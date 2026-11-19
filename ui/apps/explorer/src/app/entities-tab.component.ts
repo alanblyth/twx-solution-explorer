@@ -19,6 +19,7 @@ import type { InheritanceLevel } from './inheritance.ts';
 import {
   buildCallGraph, buildInheritanceGraph, callEdgeKey, DERIVED_LIMIT, DERIVED_THINGS_SHOWN, derivedThingCount, inheritanceNames, layoutInheritance, missingCodeReason,
 } from './entity-graphs.ts';
+import { withLinks } from './mashup-content.ts';
 import { DEPENDENCY_ROW_CAP, IMPLEMENTER_COLLECTIONS, USED_BY_LIMIT, filterUsers, firstOfGroups, groupByType, usedByCount } from './used-by.ts';
 
 const COLLECTIONS = ['Things', 'ThingTemplates', 'ThingShapes', 'DataShapes', 'Mashups', 'Projects'];
@@ -416,8 +417,15 @@ export class EntitiesTabComponent {
       if (this.selected() !== row) return;
       const isDisabled = outgoing.status === 'not-enabled' || incoming.status === 'not-enabled';
       this.disabled.set(isDisabled);
-      this.outgoing.set(outgoing.status === 'not-enabled' ? dependenciesFromDefinition(row.collection, body) : outgoing.items);
+      // The dependency services track nothing in mashup content (mashup-content.ts). A mashup's own links come from its body,
+      // read above; which mashups use this entity needs every mashup's content, read once in the background and added when ready.
+      const contentOutgoing = await api.contentLinks('out', type, row.name, body);
+      if (this.selected() !== row) return;
+      this.outgoing.set(withLinks(outgoing.status === 'not-enabled' ? dependenciesFromDefinition(row.collection, body) : outgoing.items, contentOutgoing));
       this.incoming.set(incoming.items);
+      void api.contentLinks('in', type, row.name)
+        .then((usedByMashups) => { if (this.selected() === row && usedByMashups.length) this.incoming.update((items) => withLinks(items, usedByMashups)); })
+        .catch(() => undefined);
       this.services.set(services);
       this.inheritance.set(levels);
       this.notVisible.set(body === null);
