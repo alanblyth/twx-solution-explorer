@@ -31,6 +31,7 @@ A signed-in user sees only what their visibility and permissions allow. An entit
 | `extension/` | Extension source: `metadata.xml`, `ui/` widget wrappers, `Entities/` (JSON, written by `generate_entities.py` with the twxlab builders), `build.py` |
 | `tools/dev_server.py` | Dev page and proxy to a platform, with deep links such as `/?tab=entities&entity=CM.Provisioning&service=RegisterApplication&view=sequence` or `/?tab=containers&container=CM&container-kind=Project` |
 | `tests/` | Python test of the zip layout |
+| `tools/perf/` | Performance environment generator, REST replay harness and node benchmarks; results in [docs/performance.md](docs/performance.md) |
 | `ui/tests/` | Node tests of the analyser, resolver, layouts and extension graph |
 
 ## Build, test, install
