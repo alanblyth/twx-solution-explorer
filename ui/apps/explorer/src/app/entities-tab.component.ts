@@ -3,6 +3,7 @@ import { SHARED_STYLES } from './styles.ts';
 import { GraphViewComponent } from './graph-view.component.ts';
 import { SequenceViewComponent } from './sequence-view.component.ts';
 import { CodeViewComponent } from './code-view.component.ts';
+import { PermissionsPanelComponent } from './permissions-panel.component.ts';
 import { EntityPickerComponent } from './entity-picker.component.ts';
 import { EMPTY_GRAPH, layoutGraph } from './graph-layout.ts';
 import type { GraphEdge, GraphNode, PlacedEdge, PlacedNode } from './graph-layout.ts';
@@ -37,7 +38,7 @@ const KIND_TEXT: Record<string, string> = {
   selector: 'se-entities-tab',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.ShadowDom,
-  imports: [GraphViewComponent, SequenceViewComponent, CodeViewComponent, EntityPickerComponent],
+  imports: [GraphViewComponent, SequenceViewComponent, CodeViewComponent, EntityPickerComponent, PermissionsPanelComponent],
   template: `
     <div class="layout">
       <se-entity-picker class="picker" [api]="api()" [selected]="selected()" [(collection)]="collection" (picked)="choose($event)"/>
@@ -171,6 +172,7 @@ const KIND_TEXT: Record<string, string> = {
         } @else {
           <p class="muted pad">Choose a Thing, template or shape on the left.</p>
         }
+        <se-permissions-panel [api]="api()" [entity]="selectedMember()" [(open)]="permissionsOpen" (openEntity)="openMember($event)"/>
       </section>
     </div>
   `,
@@ -202,6 +204,7 @@ const KIND_TEXT: Record<string, string> = {
     .pill.own { background: #d6e8fb; color: #0f4f9a; }
     .node-info { margin: 0; padding: 6px 8px; background: #f3f7fb; border-radius: 4px; }
     .pad { padding: 12px 0; }
+    se-permissions-panel { margin-top: auto; }
     .more { margin: 4px 0 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
     .backdrop { position: fixed; inset: 0; background: rgba(31, 41, 51, .35); display: flex; align-items: flex-start; justify-content: center; padding-top: 10vh; z-index: 10; }
     .modal { background: #fff; border-radius: 6px; box-shadow: 0 8px 28px rgba(0, 0, 0, .25); width: min(440px, calc(100% - 32px)); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
@@ -261,6 +264,13 @@ export class EntitiesTabComponent {
 
   private resolver: CallResolver | null = null;
   private analysisCounter = 0;
+
+  /** The permissions bar at the bottom: open or collapsed, kept while the tab is open. */
+  protected readonly permissionsOpen = signal(false);
+  protected readonly selectedMember = computed<MemberEntity | null>(() => {
+    const row = this.selected();
+    return row ? { name: row.name, type: singular(row.collection) } : null;
+  });
 
   protected readonly hasServices = computed(() => SERVICE_COLLECTIONS.has(this.selected()?.collection ?? ''));
   protected readonly filteredServices = computed(() => {
