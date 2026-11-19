@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Build SolutionExplorer-<version>.zip from extension/ and the Angular bundle in ui/.
+"""Build SolutionExplorer-<version>_json.zip and SolutionExplorer-<version>_xml.zip from extension/ and the Angular bundle in ui/.
 
   python extension/build.py [--no-ui-build] [--out DIR] [--version X.Y.Z]
 
 --version replaces packageVersion in the zip's metadata.xml only (every import to a platform needs a higher version).
-The zip holds metadata.xml, Entities/<Type>/<name>.json (split files merged by thingworx_package.py), ui/<widget>/*.js,
+Both zips hold the same package; they differ only in the entity files. The _json zip has Entities/<Type>/<name>.json
+(split files merged by thingworx_package.py), the _xml zip the same entities as Entities/<Type>/<name>.xml, for platforms
+that do not import JSON entities. Each holds metadata.xml, ui/<widget>/*.js,
 ui/se-common/se-elements.js (the Angular bundle, from ui/dist/explorer/main.js) and THIRD-PARTY-NOTICES.txt.
 
 The licence notices of the third-party code in the bundle travel twice: at the top of se-elements.js as a /*! */ comment,
@@ -15,7 +17,7 @@ import argparse, json, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from thingworx_package import build_extension_zip   # noqa: E402
+from thingworx_package import ENTITY_FORMATS, build_extension_zip   # noqa: E402
 
 UI = os.path.join(HERE, "..", "ui")
 DIST = os.path.join(UI, "dist", "explorer")
@@ -101,11 +103,12 @@ def main():
     os.makedirs(options.out, exist_ok=True)
     notices = third_party_notices()
     bundle_path = bundle_with_notices(notices, options.out)
-    path = build_extension_zip(HERE, options.out, version=options.version, extra_files={
-        "ui/se-common/se-elements.js": bundle_path,
-        "THIRD-PARTY-NOTICES.txt": notices.encode("utf-8"),
-    })
-    print(path)
+    for entity_format in ENTITY_FORMATS:   # the same package twice: JSON entities, and XML for platforms without JSON import
+        path = build_extension_zip(HERE, options.out, version=options.version, entity_format=entity_format, extra_files={
+            "ui/se-common/se-elements.js": bundle_path,
+            "THIRD-PARTY-NOTICES.txt": notices.encode("utf-8"),
+        })
+        print(path)
 
 
 if __name__ == "__main__":
