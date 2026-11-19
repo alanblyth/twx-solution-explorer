@@ -95,7 +95,10 @@ def main():
     parser.add_argument("--version", default=None)
     options = parser.parse_args()
     if not options.no_ui_build:
-        subprocess.run(["npm", "run", "build"], cwd=UI, check=True)
+        if not os.path.isdir(NODE_MODULES):
+            print("Installing npm dependencies...")
+            subprocess.run("npm install", cwd=UI, check=True, shell=True)
+        subprocess.run("npm run build", cwd=UI, check=True, shell=True)
     if not os.path.isfile(BUNDLE):
         sys.exit(f"{BUNDLE} is missing: build the UI first")
     os.makedirs(options.out, exist_ok=True)
