@@ -44,11 +44,11 @@ Needs Node 22+ and Python 3.9+. The build, the entity generator, the tests and t
 
 ```bash
 (cd ui && npm test)                                   # unit tests (node --test)
-python3 extension/build.py                            # builds the bundle and build/SolutionExplorer-<version>.zip
+python3 extension/build.py                            # builds the bundle, build/SolutionExplorer-<version>_json.zip and _xml.zip
 python3 -m unittest discover -s tests -t .            # zip layout test
 ```
 
-Import the zip in Composer (Import / Export, Extensions). Extension import must be enabled on the platform (notes section 7), and every import needs a higher `packageVersion` in `extension/metadata.xml` (or `build.py --version`). Open the mashup at `/Thingworx/Runtime/index.html#mashup=SE.Explorer`, or place the **Solution Explorer** widget on your own mashup. Its properties: `StartTab` (`extensions`, `containers` or `entities`), `Entity`, `EntityCollection`, `Service`, `View`, `Container`, `ContainerKind` (`Project` or `Extension`) (bindable in) and `SelectedEntity`, `SelectedService`, `SelectedExtension`, `SelectedContainer` (bindable out, with events).
+Both zips hold the same extension: `_json` has its entities as JSON, `_xml` as XML for platforms that do not import JSON entities (the XML zip was checked on ThingWorx 10.2.1: install, upgrade, and a mashup identical to the JSON one). Import one of them in Composer (Import / Export, Extensions). Extension import must be enabled on the platform (notes section 7), and every import needs a higher `packageVersion` in `extension/metadata.xml` (or `build.py --version`). Open the mashup at `/Thingworx/Runtime/index.html#mashup=SE.Explorer`, or place the **Solution Explorer** widget on your own mashup. Its properties: `StartTab` (`extensions`, `containers` or `entities`), `Entity`, `EntityCollection`, `Service`, `View`, `Container`, `ContainerKind` (`Project` or `Extension`) (bindable in) and `SelectedEntity`, `SelectedService`, `SelectedExtension`, `SelectedContainer` (bindable out, with events).
 
 Develop against a platform without re-importing:
 

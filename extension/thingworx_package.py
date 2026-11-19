@@ -386,6 +386,67 @@ def merged_entity_files(source_dir):
                     yield f"Entities/{kind}/{entry}", handle.read()
 
 
+# ------------------------------------------------------------------------------------------------------------ entity XML
+
+# Kinds the XML form supports, and per kind the root element, the entity element, and the fields left out of the XML because
+# the platform fills them on import (permissions, configuration tables with their default rows, the run-time lists).
+XML_KINDS = {
+    "Projects": ("Projects", "Project", set()),
+    "Mashups": ("Mashups", "Mashup", {"configurationTables", "things", "thingShapes", "thingTemplates", "preview"}),
+}
+XML_ALWAYS_LEFT_OUT = {"avatar", "designTimePermissions", "runTimePermissions", "visibilityPermissions",
+                       "configurationTableDefinitions", "configurationTables", "aspects", "parameterDefinitions", "mashupContent"}
+
+
+def _xml_attribute_text(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return ";".join(str(item) for item in value)
+    return str(value)
+
+
+def _xml_escape(text):
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+            .replace("\n", "&#10;").replace("\r", "&#13;").replace("\t", "&#9;"))
+
+
+def _xml_attributes(fields):
+    return "".join(f' {name}="{_xml_escape(_xml_attribute_text(value))}"' for name, value in sorted(fields.items()))
+
+
+def _cdata(text):
+    return "<![CDATA[" + text.replace("]]>", "]]]]><![CDATA[>") + "]]>"
+
+
+def entity_xml(kind, merged_json):
+    """The XML form of one merged JSON entity document (as `merge_entity` returns it), for platforms that import only
+    XML entities. Plain fields become attributes, `aspects` become `aspect.<name>` attributes, a mashup's parameters
+    become `ParameterDefinitions` and its content a CDATA `mashupContent`. Only the kinds in XML_KINDS are supported."""
+    if kind not in XML_KINDS:
+        raise ValueError(f"no XML form for {kind}: add it to XML_KINDS and check an import of it on a platform")
+    root_element, entity_element, left_out = XML_KINDS[kind]
+    entity = entity_of(json.loads(merged_json))
+    attributes = {name: value for name, value in entity.items()
+                  if name not in XML_ALWAYS_LEFT_OUT and name not in left_out and not isinstance(value, dict)
+                  and not (isinstance(value, list) and value and isinstance(value[0], dict))}
+    attributes.update({f"aspect.{name}": value for name, value in (entity.get("aspects") or {}).items()})
+    children = []
+    if kind == "Mashups":
+        parameters = "".join(
+            "<FieldDefinition" + _xml_attributes({
+                "name": parameter["name"], "baseType": parameter["baseType"], "description": parameter.get("description", ""),
+                "ordinal": parameter.get("ordinal", 0),
+                **{f"aspect.{name}": value for name, value in (parameter.get("aspects") or {}).items()}}) + "/>"
+            for parameter in sorted((entity.get("parameterDefinitions") or {}).values(), key=lambda item: item.get("ordinal", 0)))
+        children.append(f"<ParameterDefinitions>{parameters}</ParameterDefinitions>")
+        children.append(f"<mashupContent>{_cdata(entity.get('mashupContent') or '')}</mashupContent>")
+    body = "".join(children)
+    entity_text = f"<{entity_element}{_xml_attributes(attributes)}>{body}</{entity_element}>" if body else \
+        f"<{entity_element}{_xml_attributes(attributes)}/>"
+    return (f'<?xml version="1.0" encoding="UTF-8"?>\n<Entities><{root_element}>{entity_text}</{root_element}></Entities>\n').encode("utf-8")
+
+
 # ------------------------------------------------------------------------------------------------------------- package zip
 
 def _attribute(tag, name):
@@ -400,14 +461,23 @@ def read_metadata(package):
     return _attribute(tag, "name"), _attribute(tag, "packageVersion")
 
 
-def build_extension_zip(source_dir, output_dir, version=None, extra_files=None, folders=("Entities", "ui"), merge=True):
-    """Zip `source_dir` into <name>-<version>.zip in `output_dir` and return its path.
+ENTITY_FORMATS = ("json", "xml")
+
+
+def build_extension_zip(source_dir, output_dir, version=None, extra_files=None, folders=("Entities", "ui"), merge=True,
+                        entity_format="json"):
+    """Zip `source_dir` into <name>-<version>_<entity_format>.zip in `output_dir` and return its path.
 
     The zip holds metadata.xml, the files under each folder in `folders`, and `extra_files` ({archive name: bytes or path}),
     for example a built UI bundle. `version` replaces packageVersion in the zip only; the file on disk is not changed. With
     `merge` (the default) each entity folder under Entities/ is merged into one JSON file, because an extension import does
-    not merge the split files.
+    not merge the split files. `entity_format` "xml" writes each merged entity as Entities/<Type>/<name>.xml instead
+    (`entity_xml`), for platforms that do not import JSON entities; it needs `merge`.
     """
+    if entity_format not in ENTITY_FORMATS:
+        raise ValueError(f"entity_format must be one of {ENTITY_FORMATS}, got {entity_format!r}")
+    if entity_format == "xml" and not merge:
+        raise ValueError("XML entities are written from merged JSON: merge must be on")
     with open(os.path.join(source_dir, "metadata.xml"), encoding="utf-8") as handle:
         metadata = handle.read()
     tag = PACKAGE_TAG.search(metadata).group(0)
@@ -418,12 +488,15 @@ def build_extension_zip(source_dir, output_dir, version=None, extra_files=None, 
         metadata = metadata.replace(tag, re.sub(r'packageVersion="[^"]*"', f'packageVersion="{version}"', tag), 1)
     final_version = version or version_on_disk
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"{name}-{final_version}.zip")
+    output_path = os.path.join(output_dir, f"{name}-{final_version}_{entity_format}.zip")
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("metadata.xml", metadata)
         for folder in folders:
             if merge and folder == "Entities":
                 for archive_name, content in merged_entity_files(source_dir):
+                    if entity_format == "xml" and archive_name.endswith(".json"):
+                        kind = archive_name.split("/")[1]
+                        archive_name, content = archive_name[: -len(".json")] + ".xml", entity_xml(kind, content)
                     archive.writestr(archive_name, content)
                 continue
             for directory, _, file_names in os.walk(os.path.join(source_dir, folder)):
