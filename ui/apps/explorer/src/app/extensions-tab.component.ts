@@ -5,10 +5,10 @@ import { EMPTY_GRAPH, layoutGraph } from './graph-layout.ts';
 import type { GraphEdge, GraphNode, PlacedEdge, PlacedNode } from './graph-layout.ts';
 import { buildExtensionGraph, memberKey } from './extension-graph.ts';
 import type { ExtensionGraph, MemberEntity } from './extension-graph.ts';
-import { mapWithLimit } from './twx-api.ts';
+import { mapWithLimit, unreadableEntity } from './twx-api.ts';
 import { dependenciesFromDefinition } from './inheritance.ts';
 import { collectionOfType } from './models.ts';
-import type { TwxApi } from './twx-api.ts';
+import type { TwxApi, UnreadableEntity } from './twx-api.ts';
 import { perfStart, perfSync } from './perf.ts';
 
 type Status = 'idle' | 'loading' | 'done' | 'error';
@@ -31,8 +31,10 @@ type Status = 'idle' | 'loading' | 'done' | 'error';
       <span class="legend"><i class="solid"></i> uses entities of <i class="dash"></i> declared only</span>
     </div>
     @if (status() === 'error') { <p class="error">{{ error() }}</p> }
-    @if (incomplete() > 0) {
-      <p class="warn">{{ incomplete() }} entities could not be read (not visible to you), so some dependencies may be missing.</p>
+    @if (incomplete().length > 0) {
+      <div class="warn">{{ incomplete().length }} entit{{ incomplete().length === 1 ? 'y' : 'ies' }} could not be read, so some dependencies may be missing.
+        <details><summary>Which</summary>@for (entity of incomplete(); track $index) { <div>{{ entity.name }} <span class="pill">{{ entity.type }}</span> <span class="muted">{{ entity.reason }}</span></div> }</details>
+      </div>
     }
     @if (fromDefinition() > 0) {
       <p class="muted">{{ fromDefinition() }} disabled Thing(s) were read from their definition (template, shapes, value stream, data shapes only).</p>
@@ -111,7 +113,8 @@ export class ExtensionsTabComponent implements OnInit {
   protected readonly error = signal('');
   protected readonly progress = signal({ phase: '', done: 0, total: 0 });
   protected readonly graph = signal<ExtensionGraph | null>(null);
-  protected readonly incomplete = signal(0);
+  /** Entities whose dependencies could not be read, and why (not visible to you, or the platform's error). */
+  protected readonly incomplete = signal<UnreadableEntity[]>([]);
   protected readonly fromDefinition = signal(0);
   protected readonly hideIsolated = signal(false);
   protected readonly selectedNode = signal<string | null>(null);
@@ -165,7 +168,7 @@ export class ExtensionsTabComponent implements OnInit {
     this.cancelled = false;
     this.status.set('loading');
     this.error.set('');
-    this.incomplete.set(0);
+    this.incomplete.set([]);
     this.fromDefinition.set(0);
     this.selectedEdge.set(null);
     try {
@@ -188,7 +191,7 @@ export class ExtensionsTabComponent implements OnInit {
       endPhase = perfStart('extensions:read dependencies');
       const outgoing = new Map<string, MemberEntity[]>();
       done = 0;
-      let unreadable = 0;
+      const unreadable: UnreadableEntity[] = [];
       let readFromDefinition = 0;
       this.progress.set({ phase: 'Reading dependencies', done, total: everyMember.length });
       await mapWithLimit(everyMember, 8, async (member) => {
@@ -199,12 +202,12 @@ export class ExtensionsTabComponent implements OnInit {
           const collection = collectionOfType(member.type);
           const body = await api.entity(collection, member.name, { fresh: true }).catch(() => null);
           if (body) { outgoing.set(memberKey(member), dependenciesFromDefinition(collection, body)); readFromDefinition += 1; }
-          else unreadable += 1;
-        } else unreadable += 1;
+          else unreadable.push(unreadableEntity(member, lookup));
+        } else unreadable.push(unreadableEntity(member, lookup));
         this.progress.update((value) => ({ ...value, done: ++done }));
       }, () => this.cancelled);
       endPhase({ members: everyMember.length });
-      this.incomplete.set(this.cancelled ? 0 : unreadable);
+      this.incomplete.set(this.cancelled ? [] : unreadable);
       this.fromDefinition.set(this.cancelled ? 0 : readFromDefinition);
       this.graph.set(perfSync('extensions:build graph', () => buildExtensionGraph(packages, members, outgoing), (graph) => ({ edges: graph.edges.length })));
       endScan({ packages: packages.length, members: everyMember.length });

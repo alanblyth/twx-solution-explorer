@@ -10,8 +10,41 @@ export class NotVisibleError extends Error {}
 /** A disabled Thing answers its services with 503 "Thing [...] is not enabled". */
 export class NotEnabledError extends Error {}
 
-export type LookupStatus = 'ok' | 'not-visible' | 'not-enabled';
-export interface DependencyLookup { items: MemberEntity[]; status: LookupStatus }
+/**
+ * The platform answered with an error of its own (a 500, or a 503 that is not a disabled Thing). `status` is the HTTP
+ * status and the message is the platform's text, for example a built-in style definition whose GetOutgoingDependencies
+ * fails with 'Cannot invoke "com.thingworx.entities.RootEntity.getID()" because "entity" is null'.
+ */
+export class PlatformError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** The platform's message from an error response: plain text, or the text of an HTML error page, at most 300 characters. */
+export function platformMessage(status: number, statusText: string, body: string): string {
+  const text = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const message = text || statusText || 'no message';
+  return `${status}: ${message.length > 300 ? message.slice(0, 297) + '...' : message}`;
+}
+
+/** 'failed': the platform could not run the lookup for this entity (see `reason`); other entities are not affected. */
+export type LookupStatus = 'ok' | 'not-visible' | 'not-enabled' | 'failed';
+export interface DependencyLookup { items: MemberEntity[]; status: LookupStatus; reason?: string }
+
+/** An entity a scan could not read, and why, as the scans list it. */
+export interface UnreadableEntity extends MemberEntity { reason: string }
+
+/** Why a lookup gave nothing, in words for the list of entities a scan could not read. */
+export function unreadableEntity(member: MemberEntity, lookup: DependencyLookup): UnreadableEntity {
+  const reason = lookup.status === 'failed' ? `the platform failed: ${lookup.reason ?? 'no message'}`
+    : lookup.status === 'not-enabled' ? 'disabled, and its definition could not be read'
+    : 'not visible to you';
+  return { name: member.name, type: member.type, reason };
+}
 
 export interface ApiOptions { baseUrl: string; appKey?: string }
 
@@ -45,9 +78,9 @@ export class TwxApi {
     if (response.status === 503) {
       const text = await response.text();
       if (/not enabled/i.test(text)) throw new NotEnabledError(text);
-      throw new Error(`503: ${text}`);
+      throw new PlatformError(503, platformMessage(503, response.statusText, text));
     }
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${path}`);
+    if (!response.ok) throw new PlatformError(response.status, platformMessage(response.status, response.statusText, await response.text()));
     const text = await response.text();
     return text.trim() ? JSON.parse(text) : null;
   }
@@ -132,11 +165,13 @@ export class TwxApi {
     } catch (error) {
       if (error instanceof NotVisibleError) return { items: [], status: 'not-visible' };
       if (error instanceof NotEnabledError) return { items: [], status: 'not-enabled' };
+      // One entity's lookup failing on the platform must not stop a scan of hundreds; a network failure still throws.
+      if (error instanceof PlatformError) return { items: [], status: 'failed', reason: error.message };
       throw error;
     }
   }
 
-  /** Entities this entity uses (`direction` out) or that use it (`in`). Null when the lookup failed (not visible, or a disabled Thing). */
+  /** Entities this entity uses (`direction` out) or that use it (`in`). Null when the lookup failed (not visible, a disabled Thing, or a platform error). */
   async dependencies(direction: 'out' | 'in', type: string, name: string): Promise<MemberEntity[] | null> {
     const lookup = await this.dependencyLookup(direction, type, name);
     return lookup.status === 'ok' ? lookup.items : null;

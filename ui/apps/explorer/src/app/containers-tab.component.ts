@@ -11,10 +11,10 @@ import { dependenciesFromDefinition } from './inheritance.ts';
 import { implementationsOf } from './call-resolver.ts';
 import { analyzeScript, flattenCalls } from './js-analyzer.ts';
 import { collectionOfType } from './models.ts';
-import { mapWithLimit } from './twx-api.ts';
+import { mapWithLimit, unreadableEntity } from './twx-api.ts';
 import { containerMembersFor, dedupeEntities } from './container-members.ts';
 import type { ContainerKind } from './container-members.ts';
-import type { TwxApi } from './twx-api.ts';
+import type { TwxApi, UnreadableEntity } from './twx-api.ts';
 import { perfStart, perfSync } from './perf.ts';
 
 export type { ContainerKind };
@@ -33,7 +33,8 @@ interface ScanResult {
   calls: Map<string, MemberEntity[]> | null;
   owners: Map<string, string>;
   dataThings: Set<string>;
-  unreadable: MemberEntity[];
+  /** Entities the scan could not read, and why. */
+  unreadable: UnreadableEntity[];
   readFromDefinition: number;
   scriptsWithErrors: number;
 }
@@ -87,8 +88,8 @@ const MAX_LISTED = 300;
       @if (scanned(); as result) {
         <aside>
           @if (result.unreadable.length) {
-            <div class="warn">{{ result.unreadable.length }} entit{{ result.unreadable.length === 1 ? 'y' : 'ies' }} could not be read (not visible to you), so some links may be missing.
-              <details><summary>Which</summary>@for (entity of result.unreadable; track $index) { <div>{{ entity.name }} <span class="pill">{{ entity.type }}</span></div> }</details>
+            <div class="warn">{{ result.unreadable.length }} entit{{ result.unreadable.length === 1 ? 'y' : 'ies' }} could not be read, so some links may be missing.
+              <details><summary>Which</summary>@for (entity of result.unreadable; track $index) { <div>{{ entity.name }} <span class="pill">{{ entity.type }}</span> <span class="muted">{{ entity.reason }}</span></div> }</details>
             </div>
           }
           @if (result.readFromDefinition) { <p class="muted">{{ result.readFromDefinition }} disabled Thing(s) read from their definition (template, shapes, value stream, data shapes and configuration).</p> }
@@ -390,12 +391,16 @@ export class ContainersTabComponent {
       // Each member's body is read at most once and not kept: a big project has thousands of bodies of about 230 kB.
       // The read is fresh (a scan shows the platform as it is now): it refreshes a body the shared cache already holds and
       // adds none, so the scan neither keeps thousands of bodies nor pushes out what the Entities tab is showing.
+      const bodyFailures = new Map<string, string>();   // member key: the platform's error when its body could not be read
       const readBody = (member: MemberEntity): Promise<any | null> =>
-        api.entity(collectionOfType(member.type), member.name, { fresh: true }).catch(() => null);
+        api.entity(collectionOfType(member.type), member.name, { fresh: true }).catch((error) => {
+          bodyFailures.set(memberKey(member), `the platform failed: ${error instanceof Error ? error.message : String(error)}`);
+          return null;
+        });
       const outgoing = new Map<string, MemberEntity[]>();
       const incoming = readIncoming ? new Map<string, MemberEntity[]>() : null;
       const calls = readCalls ? new Map<string, MemberEntity[]>() : null;
-      const unreadable: MemberEntity[] = [];
+      const unreadable: UnreadableEntity[] = [];
       let readFromDefinition = 0;
       let scriptsWithErrors = 0;
       done = 0;
@@ -413,7 +418,7 @@ export class ContainersTabComponent {
             outgoing.set(key, dependenciesFromDefinition('Things', body));
             if (body.enabled === false || body.enabled === 'false') readFromDefinition += 1;
           } else {
-            unreadable.push(member);
+            unreadable.push({ ...member, reason: bodyFailures.get(key) ?? 'not visible to you' });
             visible = false;
           }
         } else {
@@ -422,10 +427,11 @@ export class ContainersTabComponent {
           else if (lookup.status === 'not-enabled') {
             body = await readBody(member);
             if (body) { outgoing.set(key, dependenciesFromDefinition(collectionOfType(member.type), body)); readFromDefinition += 1; }
-            else unreadable.push(member);
+            else unreadable.push(unreadableEntity(member, lookup));
           } else {
-            unreadable.push(member);
-            visible = false;
+            unreadable.push(unreadableEntity(member, lookup));
+            // A failed lookup is the platform's fault for this one entity; its scripts can still be read.
+            visible = lookup.status === 'failed';
           }
         }
         if (incoming) {
