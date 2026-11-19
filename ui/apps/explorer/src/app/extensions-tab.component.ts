@@ -9,6 +9,7 @@ import { mapWithLimit } from './twx-api.ts';
 import { dependenciesFromDefinition } from './inheritance.ts';
 import { collectionOfType } from './models.ts';
 import type { TwxApi } from './twx-api.ts';
+import { perfStart, perfSync } from './perf.ts';
 
 type Status = 'idle' | 'loading' | 'done' | 'error';
 
@@ -169,8 +170,12 @@ export class ExtensionsTabComponent implements OnInit {
     this.selectedEdge.set(null);
     try {
       const api = this.api();
+      const endScan = perfStart('extensions:scan');
+      let endPhase = perfStart('extensions:read extensions');
       this.progress.set({ phase: 'Reading extensions', done: 0, total: 0 });
       const packages = await api.packages();
+      endPhase({ packages: packages.length });
+      endPhase = perfStart('extensions:list entities');
       const members = new Map<string, MemberEntity[]>();
       let done = 0;
       this.progress.set({ phase: 'Listing entities', done, total: packages.length });
@@ -179,6 +184,8 @@ export class ExtensionsTabComponent implements OnInit {
         this.progress.update((value) => ({ ...value, done: ++done }));
       }, () => this.cancelled);
       const everyMember = [...members.values()].flat();
+      endPhase({ members: everyMember.length });
+      endPhase = perfStart('extensions:read dependencies');
       const outgoing = new Map<string, MemberEntity[]>();
       done = 0;
       let unreadable = 0;
@@ -196,9 +203,11 @@ export class ExtensionsTabComponent implements OnInit {
         } else unreadable += 1;
         this.progress.update((value) => ({ ...value, done: ++done }));
       }, () => this.cancelled);
+      endPhase({ members: everyMember.length });
       this.incomplete.set(this.cancelled ? 0 : unreadable);
       this.fromDefinition.set(this.cancelled ? 0 : readFromDefinition);
-      this.graph.set(buildExtensionGraph(packages, members, outgoing));
+      this.graph.set(perfSync('extensions:build graph', () => buildExtensionGraph(packages, members, outgoing), (graph) => ({ edges: graph.edges.length })));
+      endScan({ packages: packages.length, members: everyMember.length });
       this.status.set('done');
     } catch (failure) {
       this.error.set(failure instanceof Error ? failure.message : String(failure));

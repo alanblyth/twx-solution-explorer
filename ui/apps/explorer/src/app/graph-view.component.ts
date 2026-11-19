@@ -4,6 +4,7 @@ import { edgePath } from './graph-layout.ts';
 import type { PlacedEdge, PlacedGraph, PlacedNode } from './graph-layout.ts';
 import { drawShape, SHAPE_LEGEND } from './node-shapes.ts';
 import type { ShapeDrawing } from './node-shapes.ts';
+import { perfUntilRendered } from './perf.ts';
 
 /** Pan and zoom SVG view of a laid-out graph. Click a node or an edge to select it. */
 @Component({
@@ -136,7 +137,8 @@ export class GraphViewComponent {
 
   constructor() {
     effect(() => {
-      this.graph();
+      const graph = this.graph();
+      if (graph.nodes.length) perfUntilRendered('render', { nodes: graph.nodes.length, edges: graph.edges.length });
       queueMicrotask(() => this.fit());
     });
   }
