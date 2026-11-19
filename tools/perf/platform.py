@@ -9,7 +9,7 @@ It uses twxlab.env's private builder config (its own Compose project, port 18080
 
 The Administrator password stays in the work folder's file and is never printed.
 """
-import argparse, json, os, subprocess, sys, tempfile
+import argparse, json, os, shlex, subprocess, sys, tempfile
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -70,7 +70,8 @@ def main():
     parser.add_argument("--heap", default="-Xms2g -Xmx4g", help="CATALINA_OPTS for the platform JVM")
     arguments = parser.parse_args()
     if arguments.command == "env":
-        print(f"export TWX_BASE={BASE_URL}\nexport TWX_ADMIN_PASSWORD_FILE={password_file()}")
+        # Quoted, with forward slashes: an eval in Git Bash on Windows would otherwise drop the backslashes of the path.
+        print(f"export TWX_BASE={shlex.quote(BASE_URL)}\nexport TWX_ADMIN_PASSWORD_FILE={shlex.quote(password_file().as_posix())}")
         return
     if arguments.command == "stats":
         subprocess.run(["docker", "stats", "--no-stream", "--format", "{{.Name}} {{.CPUPerc}} {{.MemUsage}}",
