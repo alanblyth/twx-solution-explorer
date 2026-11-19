@@ -12,7 +12,7 @@ Measured 18 and 19 November 2026 on a throwaway ThingWorx 10.2.1 platform (`twx-
 | 4 | dagre runs on the main thread, and compound (grouped) layout grows steeply | 16,456 nodes: **114 s** frozen page. A synthetic 2,000 nodes in 80 groups: **54 minutes** | Web worker with cancel; node cap with a summary view above it | 2–3 days |
 | 5 | The project scan with "Show what uses it" drove the platform container to 4.3 GB; in one of three runs the JVM was killed and the platform restarted | Platform outage on a small host (Docker VM 7.75 GB, twx-dev also running) | Fewer, smaller requests (findings 3 and 6); size the platform for 100k Things | see 3 |
 | 6 | Per-entity dependency calls are cheap on the server (p50 1.5–1.8 ms) but there are 16,455 of each | Most of a big scan's time is client-side overhead and transfer, not platform work | Batching through a read-only service is possible but runs on System's rights; prefer findings 3 and 1 first | 2–4 days if done |
-| 7 | The app scans all extensions on every load, whatever `StartTab` says | 525 extra requests (0.2–1.9 s) when the page opens on the Entities or Projects tab | Start the tab signal from `StartTab` | 1 hour |
+| 7 | The app scans all extensions on every load, whatever `StartTab` says | 525 extra requests (0.2–1.9 s) when the page opens on the Entities or Projects tab | Start the tab signal from `StartTab` | **done**: no extension request when the page opens on another tab |
 | 8 | Basic authentication costs the platform **199 ms per request**; the session cookie 1.6 ms | `tools/dev_server.py` sent Basic on every call: an extension scan took 35 s instead of 0.5 s | Fixed here: the dev proxy reuses the session cookie | done |
 
 What scales well: the Extensions scan (610 requests, 0.15–0.21 s), the service trace (depth 8: 2,721 tree nodes from 52 requests in 0.5–0.9 s), listing collections, and opening an entity (0.10–0.13 s, 475 ms in the browser).
@@ -125,6 +125,31 @@ The resolver's cache keeps requests nearly flat as the tree grows 17-fold. Each 
 
 The synthetic graph (`perf-graph.ts`) groups 25 nodes per owner with links across groups, like a container scan with "Group by owner" off. The page is frozen for the whole layout: `javascript_tool` calls to the page timed out while dagre ran.
 
+## Shared entity cache and Thing dependencies from the body (19 November 2026)
+
+Fix 3's second option, built on `feature/shared-entity-cache`: `TwxApi.entity` keeps one least-recently-used cache of 300 bodies for every view (Reload on the Entities tab clears it), and a project scan with "Include script calls" on takes each Thing's outgoing dependencies from the body it reads for scripts instead of calling `GetOutgoingDependencies`. Scans read fresh: a fresh read refreshes a body the cache holds but adds none, so a scan of thousands of members neither keeps their bodies nor pushes out what the Entities tab shows, and the Extensions tab's Rescan sees an upgraded package's new version and `dependsOn`.
+
+Measured on a second host: Windows Server 2022, Docker Desktop (WSL 2, 4 CPUs, 31 GB), the same generator and seed, native `linux/amd64` (no emulation), JVM `-Xms2g -Xmx4g`. Two harness runs each; the ranges are both runs.
+
+| P00 scan (16,456 entities) | Before | Dependencies from the body |
+|-|-|-|
+| Script calls on | 73.4–74.6 s, 32,951 requests | **62.6–62.9 s, 16,505 requests** |
+| Script calls and "Show what uses it" | 84.1–86.8 s, 49,406 requests | **72.8–74.5 s, 32,960 requests** |
+
+Requests halve but time falls only 15%: the scan still reads 3.6 GB of bodies, and the body GET (p50 16 ms, p95 36–39 ms, platform CPU 180–190% of 4 cores) sets the pace, not the dependency call (p50 5 ms). The rest of fix 3 (reading fewer bodies, and gzip) is what moves this further.
+
+| Browsing (harness) | Before | Shared cache |
+|-|-|-|
+| The hub, three of its Things, two chained templates, in turn | 59 requests, 6.5 MB, 0.26–0.29 s | 50 requests, 4.5 MB, 0.23–0.24 s |
+
+In the app (through `tools/dev_server.py`, `?se-perf=1`): opening `Lab.Perf.P03.T000000` read three bodies (the Thing, its template, `GenericThing`), each once; before, the Thing's body was read twice. Opening its template from the "Uses" list then read no body at all. The P38 scan (864 members, calls on) gave 869 nodes and 887 links in 9.6 s, layout 411 ms.
+
+Other scenarios on this host: Extensions scan 0.28–0.34 s (604 requests), opening the hub 0.15–0.16 s, the hub's 100,000 incoming rows 0.35–0.39 s, every collection listed 0.8–1.0 s.
+
+### POSTs from Windows to a platform in Docker took 44 ms
+
+The first runs on this host gave 44 ms for every service call (POST) and 6 ms for a GET, from the harness and through the dev proxy alike; from a container on the platform's Docker network the same POST took 1–3 ms. Python's `http.client` writes a request's headers and its body separately, and through Docker Desktop's port forwarding the second write waited for the delayed acknowledgement of the first (setting `TCP_NODELAY` on the client socket changed nothing). Sending both in one write, as a browser does for a small body, brought the POST to 1.1–1.4 ms. `tools/single_write_http.py` now does this for `measure.py` and `dev_server.py`; with plain `http.client` the P00 scan took 152–157 s and the Extensions scan 4.4–4.6 s here. Results measured from Windows before this change overstate every POST by about 40 ms; the macOS figures above were not affected to this degree.
+
 ## Limits hit
 
 1. **500-row dependency lists** (`GetIncomingDependencies`, `GetOutgoingDependencies`, default `maxItems`). `GetImplementingThings` also stops at 500 and ignores `maxItems`, so `dataThings()` would miss data Things beyond 500 of a kind.
@@ -139,14 +164,16 @@ The synthetic graph (`perf-graph.ts`) groups 25 nodes per owner with links acros
 In order of value for effort.
 
 1. **Ask for every dependency row, and say when a list is cut** (0.5–1 day). Pass `{ maxItems: N }` on both dependency services (100,000 costs 0.15 s and 14 MB for the hub; make N a setting) and show "500 of 100,001" when the count equals the limit. The Entities tab's grouped lists then need paging or a "show more" (the graphs already cap at 60 and 20 nodes). Check `dataThings()` against the 500 cap of `GetImplementingThings`.
+
+   **Decided instead (19 Nov 2026), for the Entities tab:** keep the 500-row list and show at most 10 of it. "Used by" reads "500+" when the list reaches the cap, and a Search… button opens a modal that always shows at most 10 matches. For a template or shape at the cap the modal searches the platform with `QueryImplementingThings` (`maxItems` 11, `nameMask` `*text*`), which honours `maxItems` (all 100,000 for the hub with `maxItems` 200,000) and matches a substring when the mask is `*text*` (plain text matched nothing). It found `Lab.Perf.P39.T099988`, which is not among the 500 listed. Otherwise it filters the loaded list. `QueryImplementingThings` on the derived `Lab.Perf.E33.TT.Device` returned no Things, so it lists direct instances only, like `GetIncomingDependencies`. Scans still undercount above 500.
 2. **Read whole collections for search** (0.5 day). `?maxItems=200000` costs 0.3–0.5 s and 15.5 MB once per collection and keeps substring search. Warn when the row count reaches the requested limit. Server-side `nameMask` search only helps prefix queries, so keep it as a fallback for platforms past a few hundred thousand entities.
 3. **Stop reading bodies that cannot hold calls** (1–2 days). Today the project scan reads all 16,451 Thing bodies (3.6 GB) to find 3 ms of scripts. Options, cheapest first:
    - read a body only when "Include calls" is on, and offer it off by default above a member count (for example 1,000);
-   - share one body cache between the tabs and the resolver (opening an entity reads the body twice; tracing reads it again);
+   - share one body cache between the tabs and the resolver (opening an entity reads the body twice; tracing reads it again). **Done** on `feature/shared-entity-cache`, with Thing dependencies read from the body during a scan: see "Shared entity cache and Thing dependencies from the body";
    - group Things by template and read a sample to learn whether instances carry their own services. A heuristic: say so in the UI.
    - Platform side, ask the administrator to enable Tomcat compression for `application/json` (about 1 hour): every body shrinks about 10x, which helps the whole of ThingWorx, not only this app.
 4. **Lay out off the main thread, and cap what is laid out** (2–3 days). Move `layoutGraph` into a Web Worker (the bundle ships as one file through `se-common`, so build the worker inline as a Blob) with a Cancel that terminates it. Above about 1,500 nodes, show the grouped summary (one node per owner, which is already the default for outside entities) and a table of members instead of one node per member; and never compound-layout more than a few groups with cross links.
-5. **Do not scan extensions on load unless that tab is shown** (1 hour). `ExplorerComponent.tab` starts at `extensions` and the start tab is applied in a microtask, so the effect opens the Extensions tab first and its scan runs on every page load.
+5. **Do not scan extensions on load unless that tab is shown** (1 hour). `ExplorerComponent.tab` starts at `extensions` and the start tab is applied in a microtask, so the effect opens the Extensions tab first and its scan runs on every page load. **Done:** `tab` is a `linkedSignal` of `StartTab` (`start-tab.ts`); opening on the Entities tab made no extension request, and with no `StartTab` the Extensions tab still opens and scans.
 6. **Batching the per-entity calls** (2–4 days, only after 3). The server work is small (p50 1.6 ms per call); the scan's time goes to bodies and round trips. A read-only service that runs `GetOutgoingDependencies` for a list of names would cut 16,455 requests to about 30, but notes section 1 applies: inside a service, visibility is the caller's while other rights can come from System, and CLAUDE.md rules out a backend that runs as System. If it is built, it must hold no rights of its own beyond invoking the dependency services, and a test must show a user in another organisational unit gets nothing back. Caching dependency results per scan session gives most of the benefit for repeated scans with no server code.
 7. **Platform sizing guidance** (documentation). For 100,000 Things plan 4 GB of heap and 5 GB or more for the container; on a shared development VM, run Solution Explorer's large scans with nothing else heavy beside it.
 
@@ -178,3 +205,5 @@ python3 tools/perf/platform.py reset                     # deletes the container
 ```
 
 For the browser: build the UI (`npm run build` in `ui/`), run `tools/dev_server.py` with the same environment, and open `http://localhost:4300/?se-perf=1&tab=containers&container=Lab.Perf.P38&container-kind=Project` (or `tab=entities&entity=Lab.Perf.E00.TT.Device&collection=ThingTemplates`). The scripts refuse any platform other than localhost:18080.
+
+On Windows, run the same commands in Git Bash with the builder's interpreter, `../twx-container-builder/.venv/Scripts/python.exe`, in place of `python3`; `dev_server.py` also needs `PYTHONPATH` set to `../twx-knowledge` for `twxlab`. Without Node on the host, the scenarios `trace` and `layout` (which run `node`) are left out, and the UI tests and build run in a container: `docker run --rm -v "$(pwd -W)/ui:/work" -v se-ui-node-modules:/work/node_modules -w /work node:24-bookworm sh -c "npm ci && npm test && npm run build"` (with `MSYS_NO_PATHCONV=1`).

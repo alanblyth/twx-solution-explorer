@@ -197,7 +197,7 @@ export class ExtensionsTabComponent implements OnInit {
         else if (lookup.status === 'not-enabled') {
           // A disabled Thing cannot run its dependency services; its definition still names its template, shapes and so on.
           const collection = collectionOfType(member.type);
-          const body = await api.entity(collection, member.name).catch(() => null);
+          const body = await api.entity(collection, member.name, { fresh: true }).catch(() => null);
           if (body) { outgoing.set(memberKey(member), dependenciesFromDefinition(collection, body)); readFromDefinition += 1; }
           else unreadable += 1;
         } else unreadable += 1;

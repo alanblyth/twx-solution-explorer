@@ -2,6 +2,7 @@ import { collectionOfType } from './models.ts';
 import type { EntityRow, PackageInfo } from './models.ts';
 import { parseDependsOn } from './extension-graph.ts';
 import type { MemberEntity } from './extension-graph.ts';
+import { substringMask } from './used-by.ts';
 
 /** The user may not see or use the entity (HTTP 403 or 404). Common on a platform with organisational-unit visibility. */
 export class NotVisibleError extends Error {}
@@ -13,6 +14,12 @@ export type LookupStatus = 'ok' | 'not-visible' | 'not-enabled';
 export interface DependencyLookup { items: MemberEntity[]; status: LookupStatus }
 
 export interface ApiOptions { baseUrl: string; appKey?: string }
+
+/**
+ * How many entity bodies the shared cache keeps. A body is about 230 kB (almost all of it the template's effective shape),
+ * so 300 is roughly 70 MB at most; the least recently used goes first.
+ */
+export const ENTITY_CACHE_SIZE = 300;
 
 /** Thin client for the ThingWorx REST API, using the signed-in session (or an application key for development). */
 export class TwxApi {
@@ -49,14 +56,37 @@ export class TwxApi {
     return encodeURIComponent(name);
   }
 
-  /** Entity JSON: `GET /<collection>/<name>`. Null when it is missing or not visible. */
-  async entity(collection: string, name: string): Promise<any | null> {
-    try {
-      return await this.request('GET', `${collection}/${this.encode(name)}`);
-    } catch (error) {
+  private readonly bodies = new Map<string, Promise<any | null>>();
+
+  /**
+   * Entity JSON: `GET /<collection>/<name>`, null when it is missing or not visible. Shared by every tab through a small
+   * least-recently-used cache, so a template read by one view is not read again by the next. `fresh` reads it again (a
+   * scan reads what is there now) and replaces a copy that is cached, but does not add one: a scan of thousands of
+   * members would otherwise push out every body the user is browsing. A failed read is not kept.
+   */
+  entity(collection: string, name: string, options: { fresh?: boolean } = {}): Promise<any | null> {
+    const key = `${collection}/${name}`;
+    const cached = this.bodies.get(key);
+    if (cached && !options.fresh) {
+      this.bodies.delete(key);
+      this.bodies.set(key, cached);   // most recently used last
+      return cached;
+    }
+    const body = this.request('GET', `${collection}/${this.encode(name)}`).catch((error) => {
       if (error instanceof NotVisibleError) return null;
       throw error;
-    }
+    });
+    if (options.fresh && !cached) return body;
+    body.catch(() => { if (this.bodies.get(key) === body) this.bodies.delete(key); });
+    this.bodies.delete(key);
+    this.bodies.set(key, body);
+    while (this.bodies.size > ENTITY_CACHE_SIZE) this.bodies.delete(this.bodies.keys().next().value as string);
+    return body;
+  }
+
+  /** Forgets every cached entity body (the user asked to read the platform again). */
+  forgetEntities(): void {
+    this.bodies.clear();
   }
 
   private readonly listings = new Map<string, Promise<EntityRow[]>>();
@@ -80,7 +110,8 @@ export class TwxApi {
   async packages(): Promise<PackageInfo[]> {
     const list = await this.request('GET', 'ExtensionPackages');
     const names: string[] = (list?.rows ?? []).map((row: any) => row.name);
-    const details = await mapWithLimit(names, 6, async (name) => this.entity('ExtensionPackages', name));
+    // Fresh: a rescan after an upgrade must show the new version and dependsOn.
+    const details = await mapWithLimit(names, 6, async (name) => this.entity('ExtensionPackages', name, { fresh: true }));
     return names.map((name, index) => {
       const body = details[index] ?? {};
       return { name, version: body.packageVersion ?? '', vendor: body.vendor ?? '', description: body.description ?? '', dependsOn: parseDependsOn(body.dependsOn) };
@@ -109,6 +140,20 @@ export class TwxApi {
   async dependencies(direction: 'out' | 'in', type: string, name: string): Promise<MemberEntity[] | null> {
     const lookup = await this.dependencyLookup(direction, type, name);
     return lookup.status === 'ok' ? lookup.items : null;
+  }
+
+  /**
+   * Things that implement a template or shape whose name contains `text` (`QueryImplementingThings`, which, unlike
+   * GetIncomingDependencies and GetImplementingThings, honours `maxItems`). Asks for one more than `limit` to tell
+   * whether there are more; names in alphabetical order.
+   */
+  async searchImplementingThings(collection: string, name: string, text: string, limit: number): Promise<{ items: MemberEntity[]; more: boolean }> {
+    const parameters: Record<string, unknown> = { maxItems: limit + 1 };
+    const mask = substringMask(text);
+    if (mask) parameters['nameMask'] = mask;
+    const result = await this.request('POST', `${collection}/${this.encode(name)}/Services/QueryImplementingThings`, parameters);
+    const names: string[] = (result?.rows ?? []).map((row: any) => row.name).sort((left: string, right: string) => left.localeCompare(right));
+    return { items: names.slice(0, limit).map((thing) => ({ name: thing, type: 'Thing' })), more: names.length > limit };
   }
 
   /** The entities of a project (`Projects/<name>` `GetEntities`). */

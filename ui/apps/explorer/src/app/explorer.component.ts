@@ -5,6 +5,8 @@ import { EntitiesTabComponent } from './entities-tab.component.ts';
 import { ContainersTabComponent } from './containers-tab.component.ts';
 import type { ContainerKind, ContainerRequest, EntityRequest } from './containers-tab.component.ts';
 import { TwxApi } from './twx-api.ts';
+import { startTabOf } from './start-tab.ts';
+import type { Tab } from './start-tab.ts';
 
 /** The Solution Explorer: one element, three tabs. Used as <se-explorer> by the ThingWorx widget. */
 @Component({
@@ -56,7 +58,12 @@ export class ExplorerComponent {
   readonly extensionSelected = output<string>();
   readonly containerSelected = output<string>();
 
-  protected readonly tab = signal<Tab>('extensions');
+  /**
+   * The tab shown: StartTab until the user picks another. It follows the input directly, so the first tab created is the
+   * start tab; a tab that started as 'extensions' and changed later created the Extensions tab, and ran its scan, on
+   * every page load whatever StartTab said.
+   */
+  protected readonly tab = linkedSignal<Tab>(() => startTabOf(this.startTab()));
   protected readonly api = computed(() => new TwxApi({ baseUrl: this.baseUrl(), appKey: this.appKey() }));
   /** Scans are expensive: a tab is created when it is first shown, and kept. */
   protected readonly opened = signal(new Set<Tab>());
@@ -68,7 +75,6 @@ export class ExplorerComponent {
     this.container() ? { kind: toContainerKind(this.containerKind()), name: this.container() } : null);
 
   constructor() {
-    queueMicrotask(() => this.tab.set(TABS.includes(this.startTab()) ? this.startTab() : 'extensions'));
     effect(() => {
       const tab = this.tab();
       if (!this.opened().has(tab)) this.opened.update((tabs) => new Set(tabs).add(tab));
@@ -92,9 +98,6 @@ export class ExplorerComponent {
     this.containerRequest.set({ kind, name });
   }
 }
-
-type Tab = 'extensions' | 'containers' | 'entities';
-const TABS: Tab[] = ['extensions', 'containers', 'entities'];
 
 function toContainerKind(value: string): ContainerKind {
   return /^ext/i.test(value) ? 'Extension' : 'Project';

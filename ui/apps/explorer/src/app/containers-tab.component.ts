@@ -91,7 +91,7 @@ const MAX_LISTED = 300;
               <details><summary>Which</summary>@for (entity of result.unreadable; track $index) { <div>{{ entity.name }} <span class="pill">{{ entity.type }}</span></div> }</details>
             </div>
           }
-          @if (result.readFromDefinition) { <p class="muted">{{ result.readFromDefinition }} disabled Thing(s) read from their definition (template, shapes, value stream, data shapes only).</p> }
+          @if (result.readFromDefinition) { <p class="muted">{{ result.readFromDefinition }} disabled Thing(s) read from their definition (template, shapes, value stream, data shapes and configuration).</p> }
           @if (result.scriptsWithErrors) { <p class="muted">{{ result.scriptsWithErrors }} script(s) did not parse; their calls were found by pattern matching.</p> }
           @if (selectedEdge()) {
             <h3>{{ labelOf(selectedEdgeEnds()[0]) }} → {{ labelOf(selectedEdgeEnds()[1]) }}</h3>
@@ -387,16 +387,11 @@ export class ContainersTabComponent {
       let analysisMilliseconds = 0;
       let done = 0;
 
-      const definitions = new Map<string, Promise<any | null>>();
-      const definitionOf = (entity: MemberEntity): Promise<any | null> => {
-        const key = memberKey(entity);
-        let found = definitions.get(key);
-        if (!found) {
-          found = api.entity(collectionOfType(entity.type), entity.name).catch(() => null);
-          definitions.set(key, found);
-        }
-        return found;
-      };
+      // Each member's body is read at most once and not kept: a big project has thousands of bodies of about 230 kB.
+      // The read is fresh (a scan shows the platform as it is now): it refreshes a body the shared cache already holds and
+      // adds none, so the scan neither keeps thousands of bodies nor pushes out what the Entities tab is showing.
+      const readBody = (member: MemberEntity): Promise<any | null> =>
+        api.entity(collectionOfType(member.type), member.name, { fresh: true }).catch(() => null);
       const outgoing = new Map<string, MemberEntity[]>();
       const incoming = readIncoming ? new Map<string, MemberEntity[]>() : null;
       const calls = readCalls ? new Map<string, MemberEntity[]>() : null;
@@ -407,19 +402,38 @@ export class ContainersTabComponent {
       this.progress.set({ phase: 'Reading dependencies', done, total: members.length });
       await mapWithLimit(members, 8, async (member) => {
         const key = memberKey(member);
-        const lookup = await api.dependencyLookup('out', member.type, member.name);
-        if (lookup.status === 'ok') outgoing.set(key, lookup.items);
-        else if (lookup.status === 'not-enabled') {
-          const body = await definitionOf(member);
-          if (body) { outgoing.set(key, dependenciesFromDefinition(collectionOfType(member.type), body)); readFromDefinition += 1; }
-          else unreadable.push(member);
-        } else unreadable.push(member);
+        const wantsScripts = calls !== null && SCRIPT_HOLDER_TYPES.has(member.type);
+        let body: any | null | undefined;   // undefined: not read yet; null: missing or not visible
+        let visible = true;
+        if (wantsScripts && member.type === 'Thing') {
+          // The body is read for the scripts anyway, and it names everything GetOutgoingDependencies lists for a Thing
+          // (dependenciesFromDefinition), so one request does both, and a disabled Thing needs no second try.
+          body = await readBody(member);
+          if (body) {
+            outgoing.set(key, dependenciesFromDefinition('Things', body));
+            if (body.enabled === false || body.enabled === 'false') readFromDefinition += 1;
+          } else {
+            unreadable.push(member);
+            visible = false;
+          }
+        } else {
+          const lookup = await api.dependencyLookup('out', member.type, member.name);
+          if (lookup.status === 'ok') outgoing.set(key, lookup.items);
+          else if (lookup.status === 'not-enabled') {
+            body = await readBody(member);
+            if (body) { outgoing.set(key, dependenciesFromDefinition(collectionOfType(member.type), body)); readFromDefinition += 1; }
+            else unreadable.push(member);
+          } else {
+            unreadable.push(member);
+            visible = false;
+          }
+        }
         if (incoming) {
           const users = await api.dependencyLookup('in', member.type, member.name);
           if (users.status === 'ok') incoming.set(key, users.items);
         }
-        if (calls && SCRIPT_HOLDER_TYPES.has(member.type) && lookup.status !== 'not-visible') {
-          const body = await definitionOf(member);
+        if (calls && wantsScripts && visible) {
+          if (body === undefined) body = await readBody(member);
           const found: MemberEntity[] = [];
           for (const implementation of Object.values<any>(implementationsOf(body))) {
             if (implementation?.handlerName !== 'Script') continue;
