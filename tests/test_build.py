@@ -58,6 +58,11 @@ class ExtensionZip(unittest.TestCase):
         self.assertIn("__seLoadElements", runtime)
         self.assertNotIn("__cmLoadElements", runtime)
 
+    def test_the_bundle_is_loaded_as_a_module_so_its_names_stay_off_window(self):
+        # A classic script made every top-level name of the ES module bundle a window global, replacing ThingWorx's "_".
+        runtime = self.archive.read("ui/se-explorer/se-explorer.runtime.js").decode()
+        self.assertRegex(runtime, r'script\.type\s*=\s*"module"')
+
 
 class ExtensionZipWithXmlEntities(ExtensionZip):
     entity_format = "xml"
