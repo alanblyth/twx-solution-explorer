@@ -56,3 +56,22 @@ test('a right-to-left layout puts what is depended on to the left of what depend
   const x = (id: string) => placed.nodes.find((node) => node.id === id)!.x;
   assert.ok(x('Base') < x('Middle') && x('Middle') < x('App'));
 });
+
+test('aligned sinks put every node that depends on nothing in one leftmost column, with no gap for the anchor', () => {
+  const nodes = ['App', 'Middle', 'Base', 'Shared', 'Alone'].map((id) => ({ id, label: id, kind: 'package' }));
+  // App depends on Middle and Shared; Middle on Base. Base, Shared and Alone depend on nothing.
+  const edges = [{ from: 'App', to: 'Middle' }, { from: 'Middle', to: 'Base' }, { from: 'App', to: 'Shared' }];
+  const placed = layoutGraph(nodes, edges, 'RL', [], { alignSinks: true });
+  const node = (id: string) => placed.nodes.find((item) => item.id === id)!;
+  assert.equal(placed.nodes.length, 5);
+  assert.equal(placed.edges.length, 3);
+  for (const sink of ['Shared', 'Alone']) assert.equal(node(sink).x, node('Base').x);
+  assert.ok(node('Base').x < node('Middle').x && node('Middle').x < node('App').x);
+  const leftEdge = Math.min(...placed.nodes.map((item) => item.x - item.width / 2));
+  assert.equal(Math.round(leftEdge), 20);
+  const right = Math.max(...placed.nodes.map((item) => item.x + item.width / 2));
+  assert.ok(placed.width >= right && placed.width <= right + 40);
+  // Without the option an unconnected node takes the first rank instead (the right side for RL).
+  const plain = layoutGraph(nodes, edges, 'RL');
+  assert.notEqual(plain.nodes.find((item) => item.id === 'Alone')!.x, plain.nodes.find((item) => item.id === 'Base')!.x);
+});
