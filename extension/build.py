@@ -4,7 +4,7 @@
   python extension/build.py [--no-ui-build] [--out DIR] [--version X.Y.Z]
 
 --version replaces packageVersion in the zip's metadata.xml only (every import to a platform needs a higher version).
-The zip holds metadata.xml, Entities/<Type>/<name>.json (split files merged by twxlab), ui/<widget>/*.js,
+The zip holds metadata.xml, Entities/<Type>/<name>.json (split files merged by thingworx_package.py), ui/<widget>/*.js,
 ui/se-common/se-elements.js (the Angular bundle, from ui/dist/explorer/main.js) and THIRD-PARTY-NOTICES.txt.
 
 The licence notices of the third-party code in the bundle travel twice: at the top of se-elements.js as a /*! */ comment,
@@ -12,9 +12,11 @@ and as THIRD-PARTY-NOTICES.txt at the root of the zip. They come from Angular's 
 LICENSE file of any runtime dependency it leaves out (it misses @dagrejs/graphlib, which dagre pulls in).
 """
 import argparse, json, os, subprocess, sys
-from twxlab.extension import build_extension_zip
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from thingworx_package import build_extension_zip   # noqa: E402
+
 UI = os.path.join(HERE, "..", "ui")
 DIST = os.path.join(UI, "dist", "explorer")
 BUNDLE = os.path.join(DIST, "main.js")

@@ -1,9 +1,10 @@
 """The extension zip has the layout the platform needs (no platform required)."""
-import os, re, tempfile, unittest, zipfile
-from twxlab.extension import build_extension_zip, read_metadata
+import os, re, sys, tempfile, unittest, zipfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 EXTENSION = os.path.join(ROOT, "extension")
+sys.path.insert(0, EXTENSION)
+from thingworx_package import build_extension_zip, read_metadata   # noqa: E402
 BUNDLE = os.path.join(ROOT, "ui", "dist", "explorer", "main.js")
 
 

@@ -8,7 +8,7 @@ ThingWorx extension `SolutionExplorer`: an Angular app in a widget that explores
 - Do not edit the notes from here; report gaps to the "ThingWorx Knowledge" session.
 - The Angular bundle is shared by widgets through a carrier widget (`se-common`) and a once-only loader with a name unique to this extension (`__seLoadElements`). Keep it unique.
 - The app is client-side REST as the signed-in user. Do not add a backend service that runs as System.
-- Entity source is JSON written by `extension/generate_entities.py` with the twxlab builders. Every import needs a higher version.
+- Entity source is JSON written by `extension/generate_entities.py` with the builders in `extension/thingworx_package.py`, a standalone copy of the parts of twxlab 0.3.0 the extension uses. The build, generator, tests and dev server must not import twxlab, because this repository is shared without `twx-knowledge`; port twxlab fixes into that file by hand. Only `tools/perf/` still uses twxlab. Every import needs a higher version.
 - Never commit PTC material or secrets. Never point tests or `dev_server.py` at a production platform.
 
 ## Coding

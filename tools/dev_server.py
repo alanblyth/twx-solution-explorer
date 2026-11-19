@@ -3,12 +3,14 @@
 
   python tools/dev_server.py [--port 4300]
 
-The platform and its password come from twxlab (TWX_BASE, TWX_ADMIN_PASSWORD or TWX_ADMIN_PASSWORD_FILE). Development only:
+The platform comes from TWX_BASE (default http://localhost:8080/Thingworx) and the Administrator password from
+TWX_ADMIN_PASSWORD or the file named by TWX_ADMIN_PASSWORD_FILE. Development only:
 every request is sent with the Administrator's credentials, so never expose the port.
 """
 import argparse, base64, http.server, os, urllib.error, urllib.parse, urllib.request
-from twxlab import client
 from single_write_http import SingleWriteHandler
+
+PLATFORM_BASE = os.environ.get("TWX_BASE", "http://localhost:8080/Thingworx").rstrip("/")
 
 # Forwards each request in one write: plain urllib added 40 ms to every proxied POST to a platform in Docker on Windows.
 OPENER = urllib.request.build_opener(SingleWriteHandler)
@@ -43,7 +45,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.reply(404, b"not found", "text/plain")
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else None
-        target = client.BASE.rsplit("/Thingworx", 1)[0] + self.path
+        target = PLATFORM_BASE.rsplit("/Thingworx", 1)[0] + self.path
         request = urllib.request.Request(target, data=body, method=self.command)
         for name in ("Content-Type", "Accept", "X-XSRF-TOKEN"):
             if self.headers.get(name):
@@ -93,12 +95,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+def admin_password():
+    """The Administrator password: TWX_ADMIN_PASSWORD, else the contents of the file named by TWX_ADMIN_PASSWORD_FILE."""
+    from_environment = os.environ.get("TWX_ADMIN_PASSWORD", "").strip()
+    if from_environment:
+        return from_environment
+    password_path = os.environ.get("TWX_ADMIN_PASSWORD_FILE")
+    if not password_path:
+        raise SystemExit("set TWX_ADMIN_PASSWORD, or TWX_ADMIN_PASSWORD_FILE to a file holding the Administrator password")
+    try:
+        with open(password_path, encoding="utf-8") as handle:
+            password = handle.read().strip()
+    except OSError as error:
+        raise SystemExit(f"cannot read the password file {password_path}: {error.strerror}") from None
+    if not password:
+        raise SystemExit(f"the password file {password_path} is empty")
+    return password
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=4300)
     options = parser.parse_args()
-    Handler.authorization = "Basic " + base64.b64encode(f"Administrator:{client.admin_password()}".encode()).decode()
-    print(f"http://localhost:{options.port}/  ->  {client.BASE}")
+    Handler.authorization = "Basic " + base64.b64encode(f"Administrator:{admin_password()}".encode()).decode()
+    print(f"http://localhost:{options.port}/  ->  {PLATFORM_BASE}")
     http.server.ThreadingHTTPServer(("127.0.0.1", options.port), Handler).serve_forever()
 
 

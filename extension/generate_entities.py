@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Write the extension's entities as JSON source (Entities/), using the twxlab builders.
+"""Write the extension's entities as JSON source (Entities/), using the builders in thingworx_package.py.
 
   python extension/generate_entities.py
 
 Run it after changing the mashup or the project. The output is committed; build.py merges the split files into the zip.
 """
 import os, shutil, sys
-from twxlab import entities
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import thingworx_package as entities   # noqa: E402
 ENTITIES = os.path.join(HERE, "Entities")
 PROJECT = "SolutionExplorer"
 PACKAGE_VERSION = "0.2.4"
