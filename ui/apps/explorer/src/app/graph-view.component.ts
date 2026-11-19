@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, computed, effect, input, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, ViewEncapsulation, afterNextRender, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import { colourOf, SHARED_STYLES } from './styles.ts';
 import { edgePath } from './graph-layout.ts';
 import type { PlacedEdge, PlacedGraph, PlacedNode } from './graph-layout.ts';
@@ -134,12 +134,22 @@ export class GraphViewComponent {
   protected readonly transform = computed(() => `translate(${this.offsetX()},${this.offsetY()}) scale(${this.scale()})`);
   private dragging: { x: number; y: number; moved: boolean } | null = null;
   private suppressClick = false;
+  /** Set once the user pans or zooms; until then the graph refits whenever its frame changes size. */
+  private userMoved = false;
 
   constructor() {
     effect(() => {
       const graph = this.graph();
       if (graph.nodes.length) perfUntilRendered('render', { nodes: graph.nodes.length, edges: graph.edges.length });
+      this.userMoved = false;
       queueMicrotask(() => this.fit());
+    });
+    // A responsive mashup sizes the widget after the first render, so the first fit can see a tiny frame.
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => {
+      const observer = new ResizeObserver(() => { if (!this.userMoved) this.fit(); });
+      observer.observe(this.frame().nativeElement);
+      destroyRef.onDestroy(() => observer.disconnect());
     });
   }
 
@@ -175,7 +185,8 @@ export class GraphViewComponent {
   fit(): void {
     const frame = this.frame().nativeElement;
     const { width, height } = this.graph();
-    if (!width || !height || !frame.clientWidth) return;
+    if (!width || !height || !frame.clientWidth || !frame.clientHeight) return;
+    this.userMoved = false;
     const scale = Math.min(frame.clientWidth / width, frame.clientHeight / height, 1.2);
     this.scale.set(scale);
     this.offsetX.set((frame.clientWidth - width * scale) / 2);
@@ -186,6 +197,7 @@ export class GraphViewComponent {
     const frame = this.frame().nativeElement;
     const x = centreX ?? frame.clientWidth / 2;
     const y = centreY ?? frame.clientHeight / 2;
+    this.userMoved = true;
     const next = Math.min(4, Math.max(0.1, this.scale() * factor));
     const ratio = next / this.scale();
     this.offsetX.set(x - (x - this.offsetX()) * ratio);
@@ -210,6 +222,7 @@ export class GraphViewComponent {
     const deltaY = event.clientY - this.dragging.y;
     if (!this.dragging.moved && Math.abs(deltaX) + Math.abs(deltaY) < 4) return;
     this.dragging.moved = true;
+    this.userMoved = true;
     this.offsetX.update((value) => value + deltaX);
     this.offsetY.update((value) => value + deltaY);
     this.dragging.x = event.clientX;

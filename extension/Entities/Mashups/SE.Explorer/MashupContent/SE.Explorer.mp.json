@@ -5,34 +5,80 @@
   "Events": [],
   "UI": {
     "Properties": {
-      "Area": "UI",
+      "Area": "Mashup",
       "Height": 800,
       "Id": "mashup-root",
-      "ResponsiveLayout": false,
+      "Left": 0,
+      "ResponsiveLayout": true,
+      "Style": "DefaultMashupStyle",
       "Title": "SE.Explorer",
+      "Top": 0,
       "Type": "mashup",
       "Visible": true,
       "Width": 1200,
-      "Z-index": 10
+      "Z-index": 10,
+      "supportsAutoResize": true
     },
     "Widgets": [
       {
         "Properties": {
           "Area": "UI",
-          "DisplayName": "se-explorer-1",
-          "Height": 780,
-          "Id": "se-explorer-1",
-          "Left": 10,
-          "Top": 10,
-          "Type": "se-explorer",
+          "DisplayName": "container-2",
+          "EnableExpandCollapse": false,
+          "ExpandCollapseTabLocation": "inside",
+          "Expanded": true,
+          "Id": "flexcontainer-2",
+          "LastContainer": true,
+          "Overlay": false,
+          "ResponsiveLayout": true,
+          "ShowDataLoading": true,
+          "ShowExpandCollapseTab": false,
+          "SourceURL": "",
+          "Style": "DefaultContainerStyle",
+          "StyleProperties": {},
+          "Type": "flexcontainer",
+          "UseTheme": true,
           "Visible": true,
-          "Width": 1180,
           "Z-index": 10,
-          "StartTab": "extensions",
-          "EntityCollection": "Things",
-          "View": "graph"
+          "align-content": "flex-start",
+          "align-items": "flex-start",
+          "flex-basis": "auto",
+          "flex-direction": "row",
+          "flex-grow": 1,
+          "flex-max-height": "",
+          "flex-max-width": "",
+          "flex-min-height": "",
+          "flex-min-width": "",
+          "flex-shrink": 1,
+          "flex-size": "default",
+          "flex-wrap": "nowrap",
+          "justify-content": "flex-start",
+          "positioning": "responsive",
+          "userCannotRemove": true
         },
-        "Widgets": []
+        "Widgets": [
+          {
+            "Properties": {
+              "Area": "UI",
+              "DisplayName": "se-explorer-1",
+              "Height": 780,
+              "Id": "se-explorer-1",
+              "LastContainer": false,
+              "Left": 0,
+              "Top": 0,
+              "ResponsiveLayout": true,
+              "Type": "se-explorer",
+              "Visible": true,
+              "Width": 1180,
+              "Z-index": 10,
+              "StartTab": "extensions",
+              "EntityCollection": "Things",
+              "View": "graph",
+              "ContainerKind": "Project"
+            },
+            "Widgets": []
+          }
+        ]
       }
     ]
   }

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, afterRenderEffect, computed, input, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, afterRenderEffect, computed, input, model, viewChild } from '@angular/core';
 import { SHARED_STYLES } from './styles.ts';
 import { highlightLines } from './code-tokens.ts';
 
@@ -11,7 +11,11 @@ import { highlightLines } from './code-tokens.ts';
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.ShadowDom,
   template: `
+    @if (collapsed()) {
+      <button class="bar" (click)="collapsed.set(false)" title="Show the code"><span>‹ Code</span></button>
+    } @else {
     <div class="head">
+      <button class="toggle" (click)="collapsed.set(true)" title="Hide the code">›</button>
       <b class="title" [title]="title()">{{ title() }}</b>
       @if (code() !== null) { <span class="pill">{{ language() === 'sql' ? 'SQL' : 'JavaScript' }}</span> }
       @if (highlighted().length) { <span class="muted">line{{ highlighted().length === 1 ? '' : 's' }} {{ sortedLines().join(', ') }}</span> }
@@ -24,6 +28,7 @@ import { highlightLines } from './code-tokens.ts';
       </div>
     } @else {
       <p class="muted reason">{{ reason() }}</p>
+    }
     }
   `,
   styles: [SHARED_STYLES, `
@@ -38,6 +43,9 @@ import { highlightLines } from './code-tokens.ts';
     .text { white-space: pre; padding-right: 12px; }
     .keyword { color: #8e24aa; font-weight: 600; } .string { color: #2e7d32; } .number-token { color: #b35c00; }
     .comment { color: #8794a1; font-style: italic; } .name { color: #1f2933; } .punctuation { color: #44505c; }
+    .toggle { padding: 0 7px; line-height: 18px; }
+    .bar { flex: 1; width: 100%; padding: 0; display: flex; align-items: flex-start; justify-content: center; background: #f3f7fb; }
+    .bar span { writing-mode: vertical-rl; padding-top: 10px; font-weight: 600; color: #44505c; }
     .reason { padding: 10px; border: 1px dashed #d5dce3; border-radius: 4px; margin: 0; }
   `],
 })
@@ -49,6 +57,8 @@ export class CodeViewComponent {
   readonly highlighted = input<number[]>([]);
   readonly title = input('');
   readonly reason = input('No source to show.');
+  /** Shrunk to a thin bar; two-way bound so the host can give the freed room to its neighbour. */
+  readonly collapsed = model(false);
 
   protected readonly lines = computed(() => {
     const lines = highlightLines(this.code() ?? '', this.language());
@@ -58,6 +68,7 @@ export class CodeViewComponent {
   protected readonly hotLines = computed(() => new Set(this.highlighted()));
   protected readonly sortedLines = computed(() => [...this.hotLines()].sort((left, right) => left - right));
   private shownCode: string | null = null;
+  private shownElement: HTMLElement | null = null;
   private readonly scroller = viewChild<ElementRef<HTMLDivElement>>('scroller');
 
   constructor() {
@@ -67,7 +78,8 @@ export class CodeViewComponent {
       const code = this.code();
       this.lines();
       if (!element) return;
-      const codeChanged = code !== this.shownCode;
+      const codeChanged = code !== this.shownCode || element !== this.shownElement;
+      this.shownElement = element;
       this.shownCode = code;
       if (!Number.isFinite(first)) {
         if (codeChanged) element.scrollTop = 0;
