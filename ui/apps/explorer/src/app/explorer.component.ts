@@ -3,6 +3,8 @@ import { SHARED_STYLES } from './styles.ts';
 import { ExtensionsTabComponent } from './extensions-tab.component.ts';
 import { EntitiesTabComponent } from './entities-tab.component.ts';
 import { ContainersTabComponent } from './containers-tab.component.ts';
+import { PermissionIssuesTabComponent } from './permission-issues-tab.component.ts';
+import { SecurityTabComponent } from './security-tab.component.ts';
 import type { ContainerKind, ContainerRequest, EntityRequest } from './containers-tab.component.ts';
 import { TwxApi } from './twx-api.ts';
 import { startTabOf } from './start-tab.ts';
@@ -13,13 +15,15 @@ import type { Tab } from './start-tab.ts';
   selector: 'se-explorer',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.ShadowDom,
-  imports: [ExtensionsTabComponent, ContainersTabComponent, EntitiesTabComponent],
+  imports: [ExtensionsTabComponent, ContainersTabComponent, EntitiesTabComponent, PermissionIssuesTabComponent, SecurityTabComponent],
   template: `
     <div class="shell">
       <nav class="tabs">
         <button [class.active]="tab() === 'extensions'" (click)="tab.set('extensions')">Extensions</button>
         <button [class.active]="tab() === 'containers'" (click)="tab.set('containers')">Projects &amp; Extensions</button>
         <button [class.active]="tab() === 'entities'" (click)="tab.set('entities')">Entities</button>
+        <button [class.active]="tab() === 'permissions'" (click)="tab.set('permissions')">Permission Issues</button>
+        <button [class.active]="tab() === 'security'" (click)="tab.set('security')">Security</button>
       </nav>
       <div class="panel" [hidden]="tab() !== 'extensions'">
         @if (opened().has('extensions')) { <se-extensions-tab [api]="api()" (extensionSelected)="extensionSelected.emit($event)" (showContents)="showContainer('Extension', $event)"/> }
@@ -29,6 +33,12 @@ import type { Tab } from './start-tab.ts';
       </div>
       <div class="panel" [hidden]="tab() !== 'entities'">
         <se-entities-tab [api]="api()" [requestedEntity]="requestedEntity()" [requestedCollection]="requestedCollection()" [requestedService]="service()" [requestedView]="view()" (entitySelected)="entitySelected.emit($event)" (serviceSelected)="serviceSelected.emit($event)"/>
+      </div>
+      <div class="panel" [hidden]="tab() !== 'permissions'">
+        @if (opened().has('permissions')) { <se-permission-issues-tab [api]="api()" (openEntity)="showEntity($event)"/> }
+      </div>
+      <div class="panel" [hidden]="tab() !== 'security'">
+        @if (opened().has('security')) { <se-security-tab [api]="api()" (openEntity)="showEntity($event)"/> }
       </div>
     </div>
   `,
@@ -44,7 +54,7 @@ import type { Tab } from './start-tab.ts';
 export class ExplorerComponent {
   readonly baseUrl = input('/Thingworx');
   readonly appKey = input('');
-  /** Which tab opens first: "extensions", "containers" (Projects & Extensions) or "entities". */
+  /** Which tab opens first: "extensions", "containers" (Projects & Extensions), "entities", "permissions" (Permission Issues) or "security". */
   readonly startTab = input<Tab>('extensions');
   readonly entity = input('');
   readonly entityCollection = input('Things');

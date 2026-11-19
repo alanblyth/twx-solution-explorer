@@ -6,7 +6,7 @@ TW.IDE.Widgets["se-explorer"] = function () {
             category: ["Common"],
             supportsAutoResize: true,
             properties: {
-                StartTab: { description: "Tab shown first: extensions, containers (Projects & Extensions) or entities", baseType: "STRING", isBindingTarget: true, isEditable: true, defaultValue: "extensions", isLocalizable: false },
+                StartTab: { description: "Tab shown first: extensions, containers (Projects & Extensions), entities, permissions (Permission Issues) or security", baseType: "STRING", isBindingTarget: true, isEditable: true, defaultValue: "extensions", isLocalizable: false },
                 Entity: { description: "Entity to open on the Entities tab", baseType: "STRING", isBindingTarget: true, isEditable: true, defaultValue: "", isLocalizable: false },
                 EntityCollection: { description: "Collection of that entity: Things, ThingTemplates, ThingShapes, DataShapes, Mashups or Projects", baseType: "STRING", isBindingTarget: true, isEditable: true, defaultValue: "Things", isLocalizable: false },
                 Container: { description: "Project or extension to open on the Projects & Extensions tab", baseType: "STRING", isBindingTarget: true, isEditable: true, defaultValue: "", isLocalizable: false },

@@ -4,6 +4,8 @@ import { parseDependsOn } from './extension-graph.ts';
 import type { MemberEntity } from './extension-graph.ts';
 import { substringMask } from './used-by.ts';
 import { entityKey, mashupContentLinks, mashupsUsing } from './mashup-content.ts';
+import type { PermissionSource, SecurityBodies } from './permissions.ts';
+import { ServiceCallIndex, UiUsageIndex, referencedScripts } from './service-usage.ts';
 
 /** The user may not see or use the entity (HTTP 403 or 404). Common on a platform with organisational-unit visibility. */
 export class NotVisibleError extends Error {}
@@ -122,6 +124,131 @@ export class TwxApi {
   forgetEntities(): void {
     this.bodies.clear();
     this.contentUsage = null;
+    this.security = null;
+    this.collectionGrants.clear();
+    this.callIndex = null;
+    this.uiIndex = null;
+  }
+
+  /** A file's text (`GET <base>/<path>`), null when it is missing or not visible. */
+  async text(path: string): Promise<string | null> {
+    const response = await fetch(`${this.baseUrl}/${path.replace(/^\/+/, '')}`, { headers: this.appKey ? { appKey: this.appKey } : {}, credentials: 'same-origin' });
+    if (!response.ok) return null;
+    return response.text();
+  }
+
+  private security: Promise<SecurityBodies | null> | null = null;
+
+  /**
+   * Every role, permission group, user group and organisation, read once until Reload. Null when the user may not list
+   * them (a non-administrator usually cannot), so who holds a grant is then unknown.
+   */
+  securityBodies(): Promise<SecurityBodies | null> {
+    if (!this.security) {
+      const readAll = async (collection: string): Promise<any[]> => {
+        const names = (await this.list(collection)).map((row) => row.name);
+        const bodies = await mapWithLimit(names, 6, (name) => this.entity(collection, name, { fresh: true }).catch(() => null));
+        return bodies.filter((body) => body);
+      };
+      const security = (async (): Promise<SecurityBodies | null> => {
+        try {
+          const [roles, permissionGroups, groups, organizations] = await Promise.all(['Roles', 'PermissionGroups', 'Groups', 'Organizations'].map(readAll));
+          // Every platform has user groups (Users, Administrators); none listed means the user may not read them.
+          return groups.length ? { roles, permissionGroups, groups, organizations } : null;
+        } catch (error) {
+          if (error instanceof NotVisibleError) return null;
+          throw error;
+        }
+      })();
+      security.catch(() => { if (this.security === security) this.security = null; });
+      this.security = security;
+    }
+    return this.security;
+  }
+
+  private readonly collectionGrants = new Map<string, Promise<PermissionSource | null>>();
+
+  /** A collection's run-time and visibility grants (`CollectionFunctions`), null when the user may not read them. */
+  collectionPermissions(collection: string): Promise<PermissionSource | null> {
+    let grants = this.collectionGrants.get(collection);
+    if (!grants) {
+      const read = (service: string) => this.request('POST', `Resources/CollectionFunctions/Services/${service}`, { collectionName: collection });
+      grants = Promise.all([read('GetRunTimePermissionsAsJSON'), read('GetVisibilityPermissionsAsJSON')])
+        .then(([runTime, visibility]): PermissionSource => ({ label: `${collection} collection`, runTime, visibility }))
+        .catch(() => null);
+      this.collectionGrants.set(collection, grants);
+    }
+    return grants;
+  }
+
+  private callIndex: Promise<ServiceCallIndex> | null = null;
+  private callIndexListeners: ((done: number, total: number) => void)[] = [];
+
+  /**
+   * Which services call each service, from the scripts of every Thing, template and shape the user can see. Read once (one
+   * body per entity, not kept in the cache) and kept until Reload; `onProgress` hears how far it got.
+   */
+  serviceCallIndex(onProgress?: (done: number, total: number) => void): Promise<ServiceCallIndex> {
+    if (onProgress) this.callIndexListeners.push(onProgress);
+    if (!this.callIndex) {
+      const index = (async () => {
+        const collections = ['Things', 'ThingTemplates', 'ThingShapes'];
+        const lists = await Promise.all(collections.map((collection) => this.list(collection).catch(() => [] as EntityRow[])));
+        const holders = lists.flatMap((rows, position) => rows.map((row) => ({ collection: collections[position], name: row.name })));
+        const result = new ServiceCallIndex();
+        let done = 0;
+        await mapWithLimit(holders, 8, async (holder) => {
+          const body = await this.entity(holder.collection, holder.name, { fresh: true }).catch(() => null);
+          if (body) result.add({ ...holder, body });
+          else result.unreadable += 1;
+          done += 1;
+          for (const listener of this.callIndexListeners) listener(done, holders.length);
+        });
+        return result;
+      })();
+      index.catch(() => { if (this.callIndex === index) this.callIndex = null; })
+        .finally(() => { if (this.callIndex === index) this.callIndexListeners = []; });
+      this.callIndex = index;
+    }
+    return this.callIndex;
+  }
+
+  private uiIndex: Promise<UiUsageIndex> | null = null;
+
+  /**
+   * Which mashups (data sources) and extension widget scripts call each service, read once until Reload. A widget's scripts
+   * are its runtime file, `Common/extensions/<package>/ui/<widget>/<widget>.runtime.js`, and the bundles it loads from there.
+   */
+  uiUsageIndex(): Promise<UiUsageIndex> {
+    if (!this.uiIndex) {
+      const index = (async () => {
+        const result = new UiUsageIndex();
+        const mashups = (await this.list('Mashups').catch(() => [] as EntityRow[])).map((row) => row.name);
+        const bodies = await mapWithLimit(mashups, 6, (name) => this.entity('Mashups', name, { fresh: true }).catch(() => null));
+        mashups.forEach((name, position) => { if (bodies[position]) result.addMashup(name, bodies[position]); });
+        const packageNames = ((await this.request('GET', 'ExtensionPackages').catch(() => null))?.rows ?? []).map((row: any) => String(row.name));
+        const widgets = (await mapWithLimit(packageNames, 4, async (packageName: string) =>
+          (await this.packageEntities(packageName).catch(() => [] as MemberEntity[]))
+            .filter((entity) => entity.type === 'Widget').map((entity) => ({ packageName, widget: entity.name })))).flat();
+        const loaded = new Set<string>();
+        await mapWithLimit(widgets, 4, async ({ packageName, widget }) => {
+          const runtimePath = `Common/extensions/${packageName}/ui/${widget}/${widget}.runtime.js`;
+          const runtime = await this.text(runtimePath).catch(() => null);
+          if (runtime === null) return;
+          result.addScript({ label: `widget ${widget}`, text: runtime });
+          for (const url of referencedScripts(runtime)) {
+            if (loaded.has(url)) continue;
+            loaded.add(url);
+            const bundle = await this.text(url.replace(/^\/Thingworx\//, '')).catch(() => null);
+            if (bundle !== null) result.addScript({ label: `${url.split('/').pop()} (loaded by widget ${widget})`, text: bundle });
+          }
+        });
+        return result;
+      })();
+      index.catch(() => { if (this.uiIndex === index) this.uiIndex = null; });
+      this.uiIndex = index;
+    }
+    return this.uiIndex;
   }
 
   /** Names of the widgets that are entities (extension widgets). Empty when the collection cannot be listed. */

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, input, output, signal, untracked } from '@angular/core';
 import { SHARED_STYLES } from './styles.ts';
 import { GraphViewComponent } from './graph-view.component.ts';
+import { PermissionsPanelComponent } from './permissions-panel.component.ts';
 import { EMPTY_GRAPH, layoutGraph } from './graph-layout.ts';
 import type { PlacedEdge, PlacedNode } from './graph-layout.ts';
 import { buildContainerGraph, callTargets, NO_OWNER } from './container-graph.ts';
@@ -48,7 +49,7 @@ const MAX_LISTED = 300;
   selector: 'se-containers-tab',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.ShadowDom,
-  imports: [GraphViewComponent],
+  imports: [GraphViewComponent, PermissionsPanelComponent],
   template: `
     <div class="toolbar head">
       <select [value]="kind()" (change)="setKind($any($event.target).value)">
@@ -142,6 +143,7 @@ const MAX_LISTED = 300;
         </aside>
       }
     </div>
+    <se-permissions-panel [api]="api()" [entity]="selectedEntity()" [(open)]="permissionsOpen" (openEntity)="openLinked($event)"/>
   `,
   styles: [SHARED_STYLES, `
     :host { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -187,6 +189,12 @@ export class ContainersTabComponent {
   protected readonly selectedNode = signal<string | null>(null);
   protected readonly selectedEdge = signal<string | null>(null);
   protected readonly optionsLoading = signal(false);
+  /** The permissions bar at the bottom, and the entity it shows: the selected entity node. */
+  protected readonly permissionsOpen = signal(false);
+  protected readonly selectedEntity = computed(() => {
+    const nodeId = this.selectedNode();
+    return nodeId ? this.entityOf(nodeId) : null;
+  });
   private readonly projectNames = signal<string[] | null>(null);
   private readonly packageNames = signal<string[] | null>(null);
   private cancelled = false;
