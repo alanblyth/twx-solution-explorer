@@ -59,7 +59,7 @@ const OPENABLE = new Set(['Things', 'ThingTemplates', 'ThingShapes', 'DataShapes
         @if (graph().nodes.length) {
           <se-graph-view [graph]="graph()" [selectedNode]="selected() ? refKey(selected()!) : null" (nodeClicked)="onNode($event)"/>
         } @else if (status() === 'done') { <p class="muted pad">Nothing links to or from it.</p> }
-        <p class="muted legend">Arrows point from the container to what it holds: organisation → unit → sub-unit or member, group → member, role → member, permission group → nested group. Green holds the selection, blue is held by it. Click a node to select it.</p>
+        <p class="muted legend">Arrows read "contained in": a user or group points to the groups, units and roles that hold it, a unit to its parent unit or organisation, and a permission group to the groups and roles that include it. Green holds the selection, blue is held by it. Click a node to select it.</p>
       </section>
 
       @if (selected(); as current) {
@@ -178,7 +178,8 @@ export class SecurityTabComponent {
     for (const link of links) {
       addNode(link.from);
       addNode(link.to);
-      edges.push({ from: refKey(link.from), to: refKey(link.to), kind: link.relation });
+      // Drawn as "contained in": the arrow leaves the member and points at what holds it (the model links container → member).
+      edges.push({ from: refKey(link.to), to: refKey(link.from), kind: link.relation });
     }
     return layoutGraph([...nodes.values()], edges, 'LR');
   });
