@@ -6,6 +6,7 @@ import { CodeViewComponent } from './code-view.component.ts';
 import { EMPTY_GRAPH, layoutGraph } from './graph-layout.ts';
 import type { GraphEdge, GraphNode, PlacedEdge, PlacedNode } from './graph-layout.ts';
 import type { Message } from './sequence-layout.ts';
+import { perfStart, perfSync } from './perf.ts';
 import { CallResolver, countNodes } from './call-resolver.ts';
 import { collectionOfType, entityLabel, serviceId, singular } from './models.ts';
 import type { CallTree, EntityRow, ServiceSummary } from './models.ts';
@@ -261,7 +262,7 @@ export class EntitiesTabComponent {
 
   private readonly callModel = computed(() => {
     const root = this.tree();
-    return root ? buildCallGraph(root, this.dataThings()) : null;
+    return root ? perfSync('entities:build call graph', () => buildCallGraph(root, this.dataThings()), (model) => ({ nodes: model.nodes.length })) : null;
   });
 
   protected readonly callGraph = computed(() => {
@@ -371,6 +372,7 @@ export class EntitiesTabComponent {
       if (!body) { body = api.entity(collection, name); bodies.set(key, body); }
       return body;
     };
+    const endOpen = perfStart('entities:open', { entity: `${row.collection}/${row.name}` });
     try {
       const [outgoing, incoming, services, body, levels] = await Promise.all([
         api.dependencyLookup('out', type, row.name),
@@ -387,6 +389,7 @@ export class EntitiesTabComponent {
       this.services.set(services);
       this.inheritance.set(levels);
       this.notVisible.set(body === null);
+      endOpen({ outgoing: outgoing.items.length, incoming: incoming.items.length });
     } catch (error) {
       if (this.selected() === row) this.loadError.set(error instanceof Error ? error.message : String(error));
     } finally {
@@ -458,10 +461,12 @@ export class EntitiesTabComponent {
     this.focusedService.set(null);
     this.hoveredCall.set(null);
     this.loadError.set(null);
+    const endTrace = perfStart('entities:trace', { entity: `${entity.collection}/${entity.name}`, service, depth: this.depth() });
     try {
       const tree = await this.resolver.resolve({ collection: entity.collection, name: entity.name }, service, {
         maxDepth: this.depth(), onProgress: (count) => { if (ticket === this.analysisCounter) this.progress.set(count); },
       });
+      endTrace({ nodes: countNodes(tree) });
       if (ticket === this.analysisCounter) this.tree.set(tree);
     } catch (error) {
       if (ticket === this.analysisCounter) this.loadError.set(error instanceof Error ? error.message : String(error));

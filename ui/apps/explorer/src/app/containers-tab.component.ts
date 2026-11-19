@@ -13,6 +13,7 @@ import { analyzeScript, flattenCalls } from './js-analyzer.ts';
 import { collectionOfType } from './models.ts';
 import { mapWithLimit } from './twx-api.ts';
 import type { TwxApi } from './twx-api.ts';
+import { perfStart, perfSync } from './perf.ts';
 
 export type ContainerKind = 'Project' | 'Extension';
 export interface ContainerRequest { kind: ContainerKind; name: string }
@@ -204,11 +205,11 @@ export class ContainersTabComponent {
   protected readonly built = computed(() => {
     const result = this.scanned();
     if (!result) return { nodes: [], edges: [], groups: [], links: [], outside: [] };
-    return buildContainerGraph({
+    return perfSync('containers:build graph', () => buildContainerGraph({
       containerKind: result.kind, containerName: result.name, members: result.members, outgoing: result.outgoing,
       incoming: this.showIncoming() ? result.incoming : null, calls: this.includeCalls() ? result.calls : null,
       ownerOf: (entity) => result.owners.get(memberKey(entity)) ?? null, groupOutside: this.groupOutside(), dataThings: result.dataThings,
-    });
+    }), (graph) => ({ nodes: graph.nodes.length, links: graph.links.length }));
   });
 
   protected readonly placed = computed(() => {
@@ -367,6 +368,8 @@ export class ContainersTabComponent {
     const readCalls = this.includeCalls();
     try {
       const api = this.api();
+      const endScan = perfStart('containers:scan', { kind, name, incoming: readIncoming, calls: readCalls });
+      let endPhase = perfStart('containers:list entities');
       this.progress.set({ phase: 'Listing entities', done: 0, total: 0 });
       const ownType = kind === 'Project' ? 'Project' : 'ExtensionPackage';
       const listed = kind === 'Project' ? await api.projectEntities(name) : await api.packageEntities(name);
@@ -375,6 +378,8 @@ export class ContainersTabComponent {
       // Who owns every other entity: each project's entities, or each extension's.
       const containerNames = kind === 'Project' ? (await api.list('Projects')).map((row) => row.name) : (await api.packages()).map((item) => item.name);
       const others = containerNames.filter((other) => other !== name);
+      endPhase({ members: members.length });
+      endPhase = perfStart('containers:read other containers');
       const owners = new Map<string, string>();
       let done = 0;
       this.progress.set({ phase: `Reading other ${kind === 'Project' ? 'projects' : 'extensions'}`, done, total: others.length });
@@ -388,6 +393,9 @@ export class ContainersTabComponent {
         this.progress.update((value) => ({ ...value, done: ++done }));
       }, stale);
       if (stale()) return this.stopped(ticket);
+      endPhase({ others: others.length, owned: owners.size });
+      endPhase = perfStart('containers:read dependencies');
+      let analysisMilliseconds = 0;
 
       const definitions = new Map<string, Promise<any | null>>();
       const definitionOf = (entity: MemberEntity): Promise<any | null> => {
@@ -427,7 +435,9 @@ export class ContainersTabComponent {
             if (implementation?.handlerName !== 'Script') continue;
             const code = implementation.configurationTables?.Script?.rows?.[0]?.code;
             if (typeof code !== 'string' || !code.trim()) continue;
+            const analysisStarted = performance.now();
             const analysis = analyzeScript(code);
+            analysisMilliseconds += performance.now() - analysisStarted;
             if (analysis.parseError) scriptsWithErrors += 1;
             found.push(...callTargets(flattenCalls(analysis.steps)));
           }
@@ -437,7 +447,9 @@ export class ContainersTabComponent {
       }, stale);
       if (stale()) return this.stopped(ticket);
 
+      endPhase({ members: members.length, analysisMilliseconds: Math.round(analysisMilliseconds) });
       const dataThings = await api.dataThings();
+      endScan({ members: members.length });
       this.scanned.set({ kind, name, members, outgoing, incoming, calls, owners, dataThings, unreadable, readFromDefinition, scriptsWithErrors });
       this.status.set('done');
     } catch (failure) {
