@@ -3,6 +3,7 @@ import { SHARED_STYLES } from './styles.ts';
 import { GraphViewComponent } from './graph-view.component.ts';
 import { SequenceViewComponent } from './sequence-view.component.ts';
 import { CodeViewComponent } from './code-view.component.ts';
+import { EntityPickerComponent } from './entity-picker.component.ts';
 import { EMPTY_GRAPH, layoutGraph } from './graph-layout.ts';
 import type { GraphEdge, GraphNode, PlacedEdge, PlacedNode } from './graph-layout.ts';
 import type { Message } from './sequence-layout.ts';
@@ -34,27 +35,10 @@ const KIND_TEXT: Record<string, string> = {
   selector: 'se-entities-tab',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.ShadowDom,
-  imports: [GraphViewComponent, SequenceViewComponent, CodeViewComponent],
+  imports: [GraphViewComponent, SequenceViewComponent, CodeViewComponent, EntityPickerComponent],
   template: `
     <div class="layout">
-      <aside class="picker">
-        <div class="toolbar">
-          <select (change)="collection.set($any($event.target).value)">
-            @for (item of collections; track item) { <option [value]="item" [selected]="item === collection()">{{ item }}</option> }
-          </select>
-          <input type="search" placeholder="Filter by name" [value]="query()" (input)="query.set($any($event.target).value)"/>
-        </div>
-        <div class="results">
-          @for (row of results(); track row.name) {
-            <div class="row" [class.on]="row.name === selected()?.name && row.collection === selected()?.collection" (click)="choose(row)" [title]="row.description">
-              <span class="name">{{ row.name }}</span>
-              <span class="muted desc">{{ row.description }}</span>
-            </div>
-          } @empty {
-            <p class="muted">{{ searching() ? 'Searching…' : 'No matches.' }}</p>
-          }
-        </div>
-      </aside>
+      <se-entity-picker class="picker" [api]="api()" [selected]="selected()" [(collection)]="collection" (picked)="choose($event)"/>
 
       <section class="detail">
         @if (selected(); as entity) {
@@ -202,11 +186,8 @@ export class EntitiesTabComponent {
   readonly entitySelected = output<string>();
   readonly serviceSelected = output<string>();
 
-  protected readonly collections = COLLECTIONS;
+  /** The picker's collection; opening a member of another kind switches it. */
   protected readonly collection = signal('Things');
-  protected readonly query = signal('');
-  protected readonly results = signal<EntityRow[]>([]);
-  protected readonly searching = signal(false);
   protected readonly selected = signal<EntityRow | null>(null);
   protected readonly subTab = signal<'dependencies' | 'services'>('dependencies');
   protected readonly loading = signal(false);
@@ -240,8 +221,6 @@ export class EntitiesTabComponent {
   protected readonly hoveredCall = signal<{ callerId: string; lines: number[] } | null>(null);
 
   private resolver: CallResolver | null = null;
-  private searchTimer: ReturnType<typeof setTimeout> | undefined;
-  private searchCounter = 0;
   private analysisCounter = 0;
 
   protected readonly hasServices = computed(() => SERVICE_COLLECTIONS.has(this.selected()?.collection ?? ''));
@@ -326,11 +305,6 @@ export class EntitiesTabComponent {
 
   constructor() {
     effect(() => {
-      const type = this.collection();
-      const text = this.query();
-      untracked(() => this.scheduleSearch(type, text));
-    });
-    effect(() => {
       const name = this.requestedEntity();
       const collection = this.requestedCollection() || 'Things';
       const service = this.requestedService();
@@ -352,24 +326,6 @@ export class EntitiesTabComponent {
   protected summary(root: CallTree): string {
     const total = countNodes(root);
     return `${total} distinct service${total === 1 ? '' : 's'} reachable to depth ${this.depth()}. Grey boxes are built-in or platform services, purple Java, amber chosen at run time, red not found.`;
-  }
-
-  private scheduleSearch(collection: string, text: string): void {
-    clearTimeout(this.searchTimer);
-    this.searchTimer = setTimeout(async () => {
-      const ticket = ++this.searchCounter;
-      this.searching.set(true);
-      try {
-        const rows = await this.api().list(collection);
-        const needle = text.trim().toLowerCase();
-        const matches = needle ? rows.filter((row) => row.name.toLowerCase().includes(needle) || row.description.toLowerCase().includes(needle)) : rows;
-        if (ticket === this.searchCounter) this.results.set(matches.slice(0, 500));
-      } catch {
-        if (ticket === this.searchCounter) this.results.set([]);
-      } finally {
-        if (ticket === this.searchCounter) this.searching.set(false);
-      }
-    }, 150);
   }
 
   protected async choose(row: EntityRow): Promise<void> {

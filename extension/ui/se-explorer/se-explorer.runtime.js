@@ -29,7 +29,7 @@ TW.Runtime.Widgets["se-explorer"] = function () {
     var ATTRIBUTES = { StartTab: "start-tab", Entity: "entity", EntityCollection: "entity-collection", Service: "service", View: "view", Container: "container", ContainerKind: "container-kind" };
 
     this.renderHtml = function () {
-        return '<div class="widget-content widget-se-explorer" style="width:100%;height:100%"></div>';
+        return '<div class="widget-content widget-se-explorer" style="width:100%;height:100%;margin:0;padding:0;overflow:hidden;box-sizing:border-box"></div>';
     };
 
     this.afterRender = function () {

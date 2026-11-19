@@ -32,7 +32,7 @@ import { TwxApi } from './twx-api.ts';
   `,
   styles: [SHARED_STYLES, `
     :host { height: 100%; width: 100%; background: #fff; }
-    .shell { display: flex; flex-direction: column; height: 100%; padding: 8px 12px; }
+    .shell { display: flex; flex-direction: column; height: 100%; padding: 2px 4px; }
     .tabs { display: flex; gap: 2px; border-bottom: 2px solid #d5dce3; }
     .tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none; padding: 8px 18px; font-weight: 600; color: #44505c; margin-bottom: -2px; }
     .tabs button.active { color: #1565c0; border-bottom-color: #1565c0; }

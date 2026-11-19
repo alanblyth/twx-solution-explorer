@@ -12,10 +12,12 @@ import { implementationsOf } from './call-resolver.ts';
 import { analyzeScript, flattenCalls } from './js-analyzer.ts';
 import { collectionOfType } from './models.ts';
 import { mapWithLimit } from './twx-api.ts';
+import { containerMembersFor, dedupeEntities } from './container-members.ts';
+import type { ContainerKind } from './container-members.ts';
 import type { TwxApi } from './twx-api.ts';
 import { perfStart, perfSync } from './perf.ts';
 
-export type ContainerKind = 'Project' | 'Extension';
+export type { ContainerKind };
 export interface ContainerRequest { kind: ContainerKind; name: string }
 export interface EntityRequest { name: string; collection: string }
 
@@ -340,10 +342,7 @@ export class ContainersTabComponent {
     if (target()) return;
     this.optionsLoading.set(true);
     try {
-      const names = kind === 'Project'
-        ? (await this.api().list('Projects')).map((row) => row.name)
-        : (await this.api().packages()).map((item) => item.name).sort((left, right) => left.localeCompare(right));
-      target.set(names);
+      target.set(await containerMembersFor(this.api()).names(kind));
     } catch (failure) {
       this.error.set(failure instanceof Error ? failure.message : String(failure));
       this.status.set('error');
@@ -371,31 +370,22 @@ export class ContainersTabComponent {
       const endScan = perfStart('containers:scan', { kind, name, incoming: readIncoming, calls: readCalls });
       let endPhase = perfStart('containers:list entities');
       this.progress.set({ phase: 'Listing entities', done: 0, total: 0 });
-      const ownType = kind === 'Project' ? 'Project' : 'ExtensionPackage';
-      const listed = kind === 'Project' ? await api.projectEntities(name) : await api.packageEntities(name);
-      const members = dedupeEntities(listed.filter((entity) => !(entity.type === ownType && entity.name === name)));
+      // A scan reads afresh (and refreshes what the entity picker filters by).
+      const containers = containerMembersFor(api);
+      const members = await containers.members(kind, name, true);
 
       // Who owns every other entity: each project's entities, or each extension's.
-      const containerNames = kind === 'Project' ? (await api.list('Projects')).map((row) => row.name) : (await api.packages()).map((item) => item.name);
-      const others = containerNames.filter((other) => other !== name);
       endPhase({ members: members.length });
       endPhase = perfStart('containers:read other containers');
-      const owners = new Map<string, string>();
-      let done = 0;
-      this.progress.set({ phase: `Reading other ${kind === 'Project' ? 'projects' : 'extensions'}`, done, total: others.length });
-      await mapWithLimit(others, 6, async (other) => {
-        try {
-          const entities = kind === 'Project' ? await api.projectEntities(other) : await api.packageEntities(other);
-          for (const entity of entities) if (!owners.has(memberKey(entity))) owners.set(memberKey(entity), other);
-        } catch {
-          // A project or extension that cannot be read leaves its entities without an owner.
-        }
-        this.progress.update((value) => ({ ...value, done: ++done }));
-      }, stale);
+      const phase = `Reading other ${kind === 'Project' ? 'projects' : 'extensions'}`;
+      const owners = await containers.ownerMap(kind, name, {
+        fresh: true, shouldStop: stale, onProgress: (done, total) => this.progress.set({ phase, done, total }),
+      });
       if (stale()) return this.stopped(ticket);
-      endPhase({ others: others.length, owned: owners.size });
+      endPhase({ owned: owners.size });
       endPhase = perfStart('containers:read dependencies');
       let analysisMilliseconds = 0;
+      let done = 0;
 
       const definitions = new Map<string, Promise<any | null>>();
       const definitionOf = (entity: MemberEntity): Promise<any | null> => {
@@ -462,10 +452,4 @@ export class ContainersTabComponent {
   private stopped(ticket: number): void {
     if (ticket === this.scanTicket) this.status.set(this.scanned() ? 'done' : 'idle');
   }
-}
-
-function dedupeEntities(entities: MemberEntity[]): MemberEntity[] {
-  const unique = new Map<string, MemberEntity>();
-  for (const entity of entities) unique.set(memberKey(entity), entity);
-  return [...unique.values()];
 }
