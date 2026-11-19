@@ -98,8 +98,11 @@ def main():
     options = parser.parse_args()
     if not options.no_ui_build:
         if not os.path.isdir(NODE_MODULES):
-            print("Installing npm dependencies...")
-            subprocess.run("npm install", cwd=UI, check=True, shell=True)
+            # npm ci installs exactly what package-lock.json records and never rewrites it; npm install can drop optional
+            # peer dependencies (@emnapi/*) from the lockfile, after which npm ci fails on every other machine.
+            install = "npm ci" if os.path.isfile(os.path.join(UI, "package-lock.json")) else "npm install"
+            print(f"Installing npm dependencies ({install})...")
+            subprocess.run(install, cwd=UI, check=True, shell=True)
         subprocess.run("npm run build", cwd=UI, check=True, shell=True)
     if not os.path.isfile(BUNDLE):
         sys.exit(f"{BUNDLE} is missing: build the UI first")
