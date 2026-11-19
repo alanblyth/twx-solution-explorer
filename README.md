@@ -28,7 +28,7 @@ A signed-in user sees only what their visibility and permissions allow. An entit
 | Path | Contents |
 |---|---|
 | `ui/` | Angular 22 app (zoneless, one custom element `se-explorer`, shadow DOM). `apps/explorer/src/app/`: `js-analyzer.ts`, `call-resolver.ts`, `extension-graph.ts`, `graph-layout.ts` (dagre), `sequence-layout.ts` hold the logic and have no Angular dependency; the `*.component.ts` files are the views |
-| `extension/` | Extension source: `metadata.xml`, `ui/` widget wrappers, `Entities/` (JSON, written by `generate_entities.py` with the twxlab builders), `build.py` |
+| `extension/` | Extension source: `metadata.xml`, `ui/` widget wrappers, `Entities/` (JSON, written by `generate_entities.py`), `build.py`, and `thingworx_package.py` (the entity builders and zip build they share) |
 | `tools/dev_server.py` | Dev page and proxy to a platform, with deep links such as `/?tab=entities&entity=CM.Provisioning&service=RegisterApplication&view=sequence` or `/?tab=containers&container=CM&container-kind=Project` |
 | `tests/` | Python test of the zip layout |
 | `tools/perf/` | Performance environment generator, REST replay harness and node benchmarks; results in [docs/performance.md](docs/performance.md) |
@@ -36,17 +36,16 @@ A signed-in user sees only what their visibility and permissions allow. An entit
 
 ## Build, test, install
 
-Needs Node 22+ and Python 3.9+. The Python side uses `twxlab` from the sibling `twx-knowledge` repository.
+Needs Node 22+ and Python 3.9+. The build, the entity generator, the tests and the dev server use the Python standard library only.
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e ../twx-knowledge
 (cd ui && npm install)
 ```
 
 ```bash
 (cd ui && npm test)                                   # unit tests (node --test)
-.venv/bin/python extension/build.py                   # builds the bundle and build/SolutionExplorer-<version>.zip
-.venv/bin/python -m unittest discover -s tests -t .   # zip layout test
+python3 extension/build.py                            # builds the bundle and build/SolutionExplorer-<version>.zip
+python3 -m unittest discover -s tests -t .            # zip layout test
 ```
 
 Import the zip in Composer (Import / Export, Extensions). Extension import must be enabled on the platform (notes section 7), and every import needs a higher `packageVersion` in `extension/metadata.xml` (or `build.py --version`). Open the mashup at `/Thingworx/Runtime/index.html#mashup=SE.Explorer`, or place the **Solution Explorer** widget on your own mashup. Its properties: `StartTab` (`extensions`, `containers` or `entities`), `Entity`, `EntityCollection`, `Service`, `View`, `Container`, `ContainerKind` (`Project` or `Extension`) (bindable in) and `SelectedEntity`, `SelectedService`, `SelectedExtension`, `SelectedContainer` (bindable out, with events).
@@ -55,7 +54,8 @@ Develop against a platform without re-importing:
 
 ```bash
 (cd ui && npx ng build explorer --configuration development)
-.venv/bin/python tools/dev_server.py        # http://localhost:4300, signed in as Administrator, dev platforms only
+TWX_BASE=http://localhost:8080/Thingworx TWX_ADMIN_PASSWORD_FILE=<file> python3 tools/dev_server.py
+                                            # http://localhost:4300, signed in as Administrator, dev platforms only
 ```
 
 ## Third-party software
