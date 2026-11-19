@@ -45,14 +45,14 @@ export function edgeKey(edge: GraphEdge): string {
 }
 
 /** Layered layout (Sugiyama, through dagre), with optional groups. Edges to unknown nodes are dropped. */
-export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'TB' | 'BT' = 'LR', groups: GraphGroup[] = []): PlacedGraph {
+export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'RL' | 'TB' | 'BT' = 'LR', groups: GraphGroup[] = []): PlacedGraph {
   const end = perfStart('layout', { nodes: nodes.length, edges: edges.length, groups: groups.length });
   const placed = placeGraph(nodes, edges, direction, groups);
   end();
   return placed;
 }
 
-function placeGraph(nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'TB' | 'BT', groups: GraphGroup[]): PlacedGraph {
+function placeGraph(nodes: GraphNode[], edges: GraphEdge[], direction: 'LR' | 'RL' | 'TB' | 'BT', groups: GraphGroup[]): PlacedGraph {
   const graph = new dagre.graphlib.Graph({ multigraph: true, compound: groups.length > 0 });
   graph.setGraph({ rankdir: direction, nodesep: 26, ranksep: 70, marginx: 20, marginy: 28 });
   graph.setDefaultEdgeLabel(() => ({}));

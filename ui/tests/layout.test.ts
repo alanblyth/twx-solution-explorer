@@ -46,3 +46,13 @@ test('mermaid output has participants, activations and frames', () => {
   assert.match(text, /else else/);
   assert.match(text, /end/);
 });
+
+test('a right-to-left layout puts what is depended on to the left of what depends on it', () => {
+  const placed = layoutGraph(
+    [{ id: 'App', label: 'App', kind: 'package' }, { id: 'Base', label: 'Base', kind: 'package' }, { id: 'Middle', label: 'Middle', kind: 'package' }],
+    [{ from: 'App', to: 'Middle' }, { from: 'Middle', to: 'Base' }],
+    'RL',
+  );
+  const x = (id: string) => placed.nodes.find((node) => node.id === id)!.x;
+  assert.ok(x('Base') < x('Middle') && x('Middle') < x('App'));
+});
