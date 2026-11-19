@@ -14,6 +14,12 @@ export interface DependencyLookup { items: MemberEntity[]; status: LookupStatus 
 
 export interface ApiOptions { baseUrl: string; appKey?: string }
 
+/**
+ * How many entity bodies the shared cache keeps. A body is about 230 kB (almost all of it the template's effective shape),
+ * so 300 is roughly 70 MB at most; the least recently used goes first.
+ */
+export const ENTITY_CACHE_SIZE = 300;
+
 /** Thin client for the ThingWorx REST API, using the signed-in session (or an application key for development). */
 export class TwxApi {
   private readonly baseUrl: string;
@@ -49,14 +55,34 @@ export class TwxApi {
     return encodeURIComponent(name);
   }
 
-  /** Entity JSON: `GET /<collection>/<name>`. Null when it is missing or not visible. */
-  async entity(collection: string, name: string): Promise<any | null> {
-    try {
-      return await this.request('GET', `${collection}/${this.encode(name)}`);
-    } catch (error) {
+  private readonly bodies = new Map<string, Promise<any | null>>();
+
+  /**
+   * Entity JSON: `GET /<collection>/<name>`, null when it is missing or not visible. Shared by every tab through a small
+   * least-recently-used cache, so a template read by one view is not read again by the next. `fresh` reads it again and
+   * replaces the cached copy (a scan reads what is there now); a failed read is not kept.
+   */
+  entity(collection: string, name: string, options: { fresh?: boolean } = {}): Promise<any | null> {
+    const key = `${collection}/${name}`;
+    const cached = this.bodies.get(key);
+    this.bodies.delete(key);
+    if (cached && !options.fresh) {
+      this.bodies.set(key, cached);   // most recently used last
+      return cached;
+    }
+    const body = this.request('GET', `${collection}/${this.encode(name)}`).catch((error) => {
       if (error instanceof NotVisibleError) return null;
       throw error;
-    }
+    });
+    body.catch(() => { if (this.bodies.get(key) === body) this.bodies.delete(key); });
+    this.bodies.set(key, body);
+    while (this.bodies.size > ENTITY_CACHE_SIZE) this.bodies.delete(this.bodies.keys().next().value as string);
+    return body;
+  }
+
+  /** Forgets every cached entity body (the user asked to read the platform again). */
+  forgetEntities(): void {
+    this.bodies.clear();
   }
 
   private readonly listings = new Map<string, Promise<EntityRow[]>>();

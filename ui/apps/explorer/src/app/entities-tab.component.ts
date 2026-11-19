@@ -364,14 +364,9 @@ export class EntitiesTabComponent {
     const api = this.api();
     void api.dataThings().then((names) => this.dataThings.set(names)).catch(() => undefined);
     const type = singular(row.collection);
-    // Several reads ask for the same entity bodies; read each once per choice.
-    const bodies = new Map<string, Promise<any | null>>();
-    const read = (collection: string, name: string): Promise<any | null> => {
-      const key = `${collection}/${name}`;
-      let body = bodies.get(key);
-      if (!body) { body = api.entity(collection, name); bodies.set(key, body); }
-      return body;
-    };
+    // The API keeps one cache of entity bodies for every view, so the body, the service list and each template of the
+    // chain are read once however many views ask, and again only after Reload.
+    const read = (collection: string, name: string): Promise<any | null> => api.entity(collection, name);
     const endOpen = perfStart('entities:open', { entity: `${row.collection}/${row.name}` });
     try {
       const [outgoing, incoming, services, body, levels] = await Promise.all([
@@ -444,6 +439,7 @@ export class EntitiesTabComponent {
   }
 
   protected refresh(): void {
+    this.api().forgetEntities();
     this.resolver = this.newResolver();
     const service = this.selectedService();
     if (service) void this.analyse(service);

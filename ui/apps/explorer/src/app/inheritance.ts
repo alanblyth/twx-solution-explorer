@@ -30,7 +30,11 @@ export async function readInheritance(read: EntityReader, collection: string, na
 
 /**
  * Dependencies read from an entity's definition, for when the dependency services cannot run (a disabled Thing answers
- * 503 "is not enabled"). Covers the template, the shapes, the value stream, the home mashup and data shapes of properties.
+ * 503 "is not enabled") and in place of GetOutgoingDependencies for a Thing whose body has been read anyway. Covers the
+ * template, the shapes, the value stream, the home mashup, data shapes of the entity's own properties, service parameters
+ * and results and events, and what its configuration names (a data Thing's persistence provider and data shape, a
+ * timer's or scheduler's run-as user). On ThingWorx 10.2.1, for every Thing of a twx-dev platform, GetOutgoingDependencies
+ * listed exactly these, except the home mashup, which it leaves out.
  */
 export function dependenciesFromDefinition(collection: string, body: any): MemberEntity[] {
   if (!body) return [];
@@ -42,7 +46,18 @@ export function dependenciesFromDefinition(collection: string, body: any): Membe
   for (const shape of Object.keys(body.implementedShapes ?? {})) add(shape, 'ThingShape');
   add(body.valueStream, 'Thing');
   add(body.homeMashup, 'Mashup');
-  const properties = body.thingShape?.propertyDefinitions ?? body.propertyDefinitions ?? {};
-  for (const property of Object.values<any>(properties)) add(property?.aspects?.dataShape, 'DataShape');
+  const own = body.thingShape ?? body;
+  for (const property of Object.values<any>(own.propertyDefinitions ?? {})) add(property?.aspects?.dataShape, 'DataShape');
+  for (const service of Object.values<any>(own.serviceDefinitions ?? {})) {
+    add(service?.resultType?.aspects?.dataShape, 'DataShape');
+    for (const parameter of Object.values<any>(service?.parameterDefinitions ?? {})) add(parameter?.aspects?.dataShape, 'DataShape');
+  }
+  for (const event of Object.values<any>(own.eventDefinitions ?? {})) add(event?.dataShape, 'DataShape');
+  const tables = body.configurationTables ?? {};
+  for (const row of tables.DataThingSettings?.rows ?? []) add(row?.persistenceProvider, 'PersistenceProvider');
+  for (const row of tables.Settings?.rows ?? []) {
+    add(row?.dataShape, 'DataShape');
+    add(row?.runAsUser, 'User');
+  }
   return [...found.values()].sort((left, right) => left.type.localeCompare(right.type) || left.name.localeCompare(right.name));
 }
