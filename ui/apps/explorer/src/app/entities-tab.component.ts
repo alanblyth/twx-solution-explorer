@@ -16,6 +16,7 @@ import { shapeForType } from './node-shapes.ts';
 import { dependenciesFromDefinition, readInheritance } from './inheritance.ts';
 import type { InheritanceLevel } from './inheritance.ts';
 import { buildCallGraph, buildInheritanceGraph, callEdgeKey, inheritanceNames, layoutInheritance, missingCodeReason } from './entity-graphs.ts';
+import { DEPENDENCY_ROW_CAP, IMPLEMENTER_COLLECTIONS, USED_BY_LIMIT, filterUsers, firstOfGroups, groupByType, usedByCount } from './used-by.ts';
 
 const COLLECTIONS = ['Things', 'ThingTemplates', 'ThingShapes', 'DataShapes', 'Mashups', 'Projects'];
 const SERVICE_COLLECTIONS = new Set(['Things', 'ThingTemplates', 'ThingShapes']);
@@ -88,11 +89,37 @@ const KIND_TEXT: Record<string, string> = {
                 @for (group of groupedOutgoing(); track group.type) {
                   <div class="group"><span class="pill">{{ group.type }}</span> @for (item of group.items; track item.name) { <a (click)="openMember(item)">{{ item.name }}</a> }</div>
                 } @empty { <div class="muted">nothing</div> }
-                <h4>Used by ({{ disabled() ? 'unknown' : incoming().length }})</h4>
-                @for (group of groupedIncoming(); track group.type) {
+                <h4 [title]="incomingCapped() ? 'The platform lists at most 500; search to find the rest' : ''">Used by ({{ disabled() ? 'unknown' : usedByCount(incoming().length) }})</h4>
+                @for (group of shownIncoming(); track group.type) {
                   <div class="group"><span class="pill">{{ group.type }}</span> @for (item of group.items; track item.name) { <a (click)="openMember(item)">{{ item.name }}</a> }</div>
                 } @empty { <div class="muted">{{ disabled() ? 'unknown while the Thing is disabled' : 'nothing' }}</div> }
+                @if (incoming().length > usedByLimit) {
+                  <p class="more"><span class="muted">Showing {{ usedByLimit }} of {{ usedByCount(incoming().length) }}.</span> <button (click)="openUsersSearch()">Search…</button></p>
+                }
               </div>
+              @if (usersSearchOpen()) {
+                <div class="backdrop" (click)="closeUsersSearch()">
+                  <div class="modal" role="dialog" aria-modal="true" [attr.aria-label]="'Search what uses ' + entity.name" (click)="$event.stopPropagation()" (keydown.escape)="closeUsersSearch()">
+                    <div class="toolbar">
+                      <h3>{{ searchesImplementers() ? 'Things on' : 'Used by' }} {{ entity.name }}</h3>
+                      <span class="spacer"></span>
+                      <button (click)="closeUsersSearch()" aria-label="Close">✕</button>
+                    </div>
+                    <input type="search" placeholder="Name contains…" [value]="usersQuery()" (input)="searchUsers($any($event.target).value)" autofocus/>
+                    <div class="modal-results">
+                      @if (usersError()) { <p class="warn error">{{ usersError() }}</p> }
+                      @for (item of usersResults(); track item.type + ':' + item.name) {
+                        <div class="row" (click)="openMember(item); closeUsersSearch()"><span class="name">{{ item.name }}</span><span class="pill">{{ item.type }}</span></div>
+                      } @empty { @if (!usersError()) { <p class="muted">{{ usersSearching() ? 'Searching…' : 'No matches.' }}</p> } }
+                    </div>
+                    <p class="muted">
+                      @if (usersMore()) { The first {{ usersLimit }} matches; type more of the name to narrow them. }
+                      @else if (usersResults().length) { {{ usersResults().length }} match(es). }
+                      @if (searchesImplementers()) { Searches every Thing on the platform that implements it, beyond the 500 listed. }
+                    </p>
+                  </div>
+                </div>
+              }
             </div>
           } @else {
             <div class="services">
@@ -176,6 +203,14 @@ const KIND_TEXT: Record<string, string> = {
     .pill.own { background: #d6e8fb; color: #0f4f9a; }
     .node-info { margin: 0; padding: 6px 8px; background: #f3f7fb; border-radius: 4px; }
     .pad { padding: 12px 0; }
+    .more { margin: 4px 0 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+    .backdrop { position: fixed; inset: 0; background: rgba(31, 41, 51, .35); display: flex; align-items: flex-start; justify-content: center; padding-top: 10vh; z-index: 10; }
+    .modal { background: #fff; border-radius: 6px; box-shadow: 0 8px 28px rgba(0, 0, 0, .25); width: min(440px, calc(100% - 32px)); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+    .modal h3 { margin: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .modal input { width: 100%; }
+    .modal-results { border: 1px solid #d5dce3; border-radius: 4px; min-height: 60px; }
+    .modal-results .row { justify-content: space-between; } .modal-results p { margin: 8px; }
+    .modal > p { margin: 0; font-size: 12px; }
   `],
 })
 export class EntitiesTabComponent {
@@ -229,8 +264,23 @@ export class EntitiesTabComponent {
     const filter = this.serviceFilter().toLowerCase();
     return this.services().filter((item) => (this.showBuiltin() || item.origin !== 'builtin') && item.name.toLowerCase().includes(filter));
   });
-  protected readonly groupedOutgoing = computed(() => group(this.outgoing()));
-  protected readonly groupedIncoming = computed(() => group(this.incoming()));
+  protected readonly groupedOutgoing = computed(() => groupByType(this.outgoing()));
+  /** "Used by" shows at most USED_BY_LIMIT entries; the search finds the others. */
+  protected readonly shownIncoming = computed(() => firstOfGroups(groupByType(this.incoming()), USED_BY_LIMIT));
+  protected readonly incomingCapped = computed(() => this.incoming().length >= DEPENDENCY_ROW_CAP);
+  protected readonly usedByLimit = USED_BY_LIMIT;
+  protected readonly usersLimit = USED_BY_LIMIT;
+  protected readonly usedByCount = usedByCount;
+  protected readonly usersSearchOpen = signal(false);
+  protected readonly usersQuery = signal('');
+  protected readonly usersResults = signal<MemberEntity[]>([]);
+  protected readonly usersMore = signal(false);
+  protected readonly usersSearching = signal(false);
+  protected readonly usersError = signal('');
+  /** A template or shape whose list was cut at 500: search the platform's Things that implement it instead of the list. */
+  protected readonly searchesImplementers = computed(() => this.incomingCapped() && IMPLEMENTER_COLLECTIONS.has(this.selected()?.collection ?? ''));
+  private usersTimer: ReturnType<typeof setTimeout> | undefined;
+  private usersCounter = 0;
 
   protected readonly hasInheritance = computed(() => INHERITANCE_COLLECTIONS.has(this.selected()?.collection ?? ''));
   protected readonly inheritanceSelf = computed(() => {
@@ -426,6 +476,49 @@ export class EntitiesTabComponent {
     this.hoveredCall.set(message && message.lines.length ? { callerId: message.callerId, lines: message.lines } : null);
   }
 
+  protected openUsersSearch(): void {
+    this.usersSearchOpen.set(true);
+    this.searchUsers('');
+  }
+
+  protected closeUsersSearch(): void {
+    clearTimeout(this.usersTimer);
+    this.usersCounter += 1;   // a search still running is ignored
+    this.usersSearchOpen.set(false);
+  }
+
+  /** Users of the selected entity whose name contains `text`, at most USED_BY_LIMIT; typed text waits 250 ms. */
+  protected searchUsers(text: string): void {
+    this.usersQuery.set(text);
+    this.usersError.set('');
+    clearTimeout(this.usersTimer);
+    const entity = this.selected();
+    if (!entity) return;
+    if (!this.searchesImplementers()) {
+      const found = filterUsers(this.incoming(), text, USED_BY_LIMIT);
+      this.usersResults.set(found.items);
+      this.usersMore.set(found.more);
+      return;
+    }
+    const counter = ++this.usersCounter;
+    this.usersSearching.set(true);
+    this.usersTimer = setTimeout(async () => {
+      try {
+        const found = await this.api().searchImplementingThings(entity.collection, entity.name, text, USED_BY_LIMIT);
+        if (counter !== this.usersCounter) return;
+        this.usersResults.set(found.items);
+        this.usersMore.set(found.more);
+      } catch (error) {
+        if (counter !== this.usersCounter) return;
+        this.usersResults.set([]);
+        this.usersMore.set(false);
+        this.usersError.set(`Search failed: ${(error as Error)?.message ?? error}`);
+      } finally {
+        if (counter === this.usersCounter) this.usersSearching.set(false);
+      }
+    }, text ? 250 : 0);
+  }
+
   protected openMember(member: MemberEntity): void {
     const collection = collectionOfType(member.type);
     this.collection.set(COLLECTIONS.includes(collection) ? collection : this.collection());
@@ -472,8 +565,3 @@ export class EntitiesTabComponent {
   }
 }
 
-function group(items: MemberEntity[]): { type: string; items: MemberEntity[] }[] {
-  const byType = new Map<string, MemberEntity[]>();
-  for (const item of items) byType.set(item.type, [...(byType.get(item.type) ?? []), item]);
-  return [...byType.entries()].map(([type, list]) => ({ type, items: list.sort((left, right) => left.name.localeCompare(right.name)) })).sort((left, right) => left.type.localeCompare(right.type));
-}

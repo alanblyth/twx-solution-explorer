@@ -2,6 +2,7 @@ import { collectionOfType } from './models.ts';
 import type { EntityRow, PackageInfo } from './models.ts';
 import { parseDependsOn } from './extension-graph.ts';
 import type { MemberEntity } from './extension-graph.ts';
+import { substringMask } from './used-by.ts';
 
 /** The user may not see or use the entity (HTTP 403 or 404). Common on a platform with organisational-unit visibility. */
 export class NotVisibleError extends Error {}
@@ -139,6 +140,20 @@ export class TwxApi {
   async dependencies(direction: 'out' | 'in', type: string, name: string): Promise<MemberEntity[] | null> {
     const lookup = await this.dependencyLookup(direction, type, name);
     return lookup.status === 'ok' ? lookup.items : null;
+  }
+
+  /**
+   * Things that implement a template or shape whose name contains `text` (`QueryImplementingThings`, which, unlike
+   * GetIncomingDependencies and GetImplementingThings, honours `maxItems`). Asks for one more than `limit` to tell
+   * whether there are more; names in alphabetical order.
+   */
+  async searchImplementingThings(collection: string, name: string, text: string, limit: number): Promise<{ items: MemberEntity[]; more: boolean }> {
+    const parameters: Record<string, unknown> = { maxItems: limit + 1 };
+    const mask = substringMask(text);
+    if (mask) parameters['nameMask'] = mask;
+    const result = await this.request('POST', `${collection}/${this.encode(name)}/Services/QueryImplementingThings`, parameters);
+    const names: string[] = (result?.rows ?? []).map((row: any) => row.name).sort((left: string, right: string) => left.localeCompare(right));
+    return { items: names.slice(0, limit).map((thing) => ({ name: thing, type: 'Thing' })), more: names.length > limit };
   }
 
   /** The entities of a project (`Projects/<name>` `GetEntities`). */
