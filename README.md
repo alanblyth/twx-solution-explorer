@@ -57,3 +57,17 @@ Develop against a platform without re-importing:
 (cd ui && npx ng build explorer --configuration development)
 .venv/bin/python tools/dev_server.py        # http://localhost:4300, signed in as Administrator, dev platforms only
 ```
+
+## Third-party software
+
+The widget's bundle (`se-elements.js`) includes these runtime packages, pinned in `ui/package.json`:
+
+| Package | Licence | Used for |
+|---|---|---|
+| `acorn` | MIT | Parsing service scripts: calls, frames, code colouring |
+| `@dagrejs/dagre`, `@dagrejs/graphlib` | MIT | Graph layout |
+| `@angular/*` | MIT | The app and its custom element |
+| `rxjs` | Apache-2.0 | Required by Angular |
+| `tslib` | 0BSD | TypeScript helpers |
+
+The production build extracts their licence texts (`extractLicenses`), and `extension/build.py` adds any runtime package the extraction leaves out. The notices ship twice: as a `/*! */` comment at the top of `se-elements.js` and as `THIRD-PARTY-NOTICES.txt` at the root of the extension zip. The build stops if a runtime package has no licence file. When you add a dependency, check its licence before you ship.
