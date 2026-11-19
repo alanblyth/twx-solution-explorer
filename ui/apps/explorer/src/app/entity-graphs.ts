@@ -8,10 +8,17 @@ import type { InheritanceLevel } from './inheritance.ts';
 import type { MemberEntity } from './extension-graph.ts';
 
 /** How many templates or Things deriving from (or implementing) the subject are drawn before a "+N more" node. */
-export const DERIVED_LIMIT = 20;
+export const DERIVED_LIMIT = 300;
+/** More derived Things than this are hidden until asked for; derived templates always show. */
+export const DERIVED_THINGS_SHOWN = 10;
 
 export interface InheritanceSubject { name: string; collection: string }
 export interface NodeGraph { nodes: GraphNode[]; edges: GraphEdge[] }
+export interface InheritanceOptions {
+  /** Draw the derived Things even when there are more than DERIVED_THINGS_SHOWN. */
+  showAllThings?: boolean;
+  limit?: number;
+}
 
 /** Outline of a service node in a call graph, by the collection of its entity. */
 export function shapeForEntity(entity: EntityRef, dataThings: Set<string>): NodeShape {
@@ -25,6 +32,7 @@ export function shapeForEntity(entity: EntityRef, dataThings: Set<string>): Node
  */
 export function buildInheritanceGraph(
   subject: InheritanceSubject, levels: InheritanceLevel[], related: MemberEntity[], dataThings: Set<string>,
+  options: InheritanceOptions = {},
 ): NodeGraph {
   const nodes = new Map<string, GraphNode>();
   const edges: GraphEdge[] = [];
@@ -48,21 +56,38 @@ export function buildInheritanceGraph(
   }
   if (subject.collection === 'ThingTemplates' || subject.collection === 'ThingShapes') {
     const edgeKind = subject.collection === 'ThingShapes' ? 'implements' : 'inherits';
-    const below = derivedEntities(related);
-    for (const item of below.slice(0, DERIVED_LIMIT)) {
+    const limit = options.limit ?? DERIVED_LIMIT;
+    const below = visibleDerived(related, options.showAllThings ?? false);
+    for (const item of below.slice(0, limit)) {
       const id = `derived:${item.type}:${item.name}`;
       nodes.set(id, { id, label: item.name, sublabel: item.type, kind: 'incoming', shape: shapeForType(item.type, item.type === 'Thing' && dataThings.has(item.name)) });
       edges.push({ from: subjectId, to: id, kind: edgeKind });
     }
-    if (below.length > DERIVED_LIMIT) {
-      nodes.set('derived:more', { id: 'derived:more', label: `+${below.length - DERIVED_LIMIT} more`, kind: 'builtin', shape: 'rect' });
+    if (below.length > limit) {
+      nodes.set('derived:more', { id: 'derived:more', label: `+${below.length - limit} more`, sublabel: 'see the Used by list', kind: 'builtin', shape: 'rect' });
       edges.push({ from: subjectId, to: 'derived:more', kind: 'declared' });
     }
   }
   return { nodes: [...nodes.values()], edges };
 }
 
-const DERIVED_COLUMNS = 3;
+/** What the inheritance graph draws below the subject: every derived template, and the Things only when few or asked for. */
+export function visibleDerived(related: MemberEntity[], showAllThings: boolean): MemberEntity[] {
+  const derived = derivedEntities(related);
+  const thingCount = derived.filter((item) => item.type === 'Thing').length;
+  return showAllThings || thingCount <= DERIVED_THINGS_SHOWN ? derived : derived.filter((item) => item.type !== 'Thing');
+}
+
+/** Number of Things deriving from (or implementing) the subject. */
+export function derivedThingCount(related: MemberEntity[]): number {
+  return derivedEntities(related).filter((item) => item.type === 'Thing').length;
+}
+
+/** Grid columns for derived entities: roughly twice as wide as tall, as the panel is. */
+export function derivedColumns(count: number): number {
+  return Math.min(12, Math.max(3, Math.ceil(Math.sqrt(count * 2))));
+}
+
 const GRID_GAP_X = 18;
 const GRID_GAP_Y = 22;
 const GRID_TOP_GAP = 56;
@@ -71,7 +96,7 @@ const GRID_TOP_GAP = 56;
  * Lays the inheritance graph out top to bottom. The chain and shapes go through dagre; what derives from the subject would all
  * share one rank and make a very wide row, so it is placed in a grid of rows below the subject instead.
  */
-export function layoutInheritance(graph: NodeGraph, subjectId: string, columns = DERIVED_COLUMNS): PlacedGraph {
+export function layoutInheritance(graph: NodeGraph, subjectId: string, columns?: number): PlacedGraph {
   const isDerived = (id: string): boolean => id.startsWith('derived:');
   const chain = layoutGraph(graph.nodes.filter((node) => !isDerived(node.id)), graph.edges.filter((edge) => !isDerived(edge.to)), 'TB');
   const derivedNodes = graph.nodes.filter((node) => isDerived(node.id));
@@ -80,7 +105,7 @@ export function layoutInheritance(graph: NodeGraph, subjectId: string, columns =
   const sized = layoutGraph(derivedNodes, [], 'TB').nodes;
   const cellWidth = Math.max(...sized.map((node) => node.width)) + GRID_GAP_X;
   const cellHeight = Math.max(...sized.map((node) => node.height)) + GRID_GAP_Y;
-  const columnCount = Math.min(columns, sized.length);
+  const columnCount = Math.min(columns ?? derivedColumns(sized.length), sized.length);
   const gridLeft = subject.x - (columnCount * cellWidth) / 2;
   const gridTop = subject.y + subject.height / 2 + GRID_TOP_GAP;
   const placedDerived: PlacedNode[] = sized.map((node, index) => ({

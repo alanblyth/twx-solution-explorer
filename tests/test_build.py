@@ -51,3 +51,37 @@ class ExtensionZip(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_build_script():
+    import importlib.util
+    specification = importlib.util.spec_from_file_location("extension_build", os.path.join(EXTENSION, "build.py"))
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+@unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "ui", "dist", "explorer", "3rdpartylicenses.txt")), "run the production UI build first")
+class ThirdPartyNotices(unittest.TestCase):
+    """The licence notices of every runtime package travel in the bundle and in the zip."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.build = load_build_script()
+        cls.notices = cls.build.third_party_notices()
+
+    def test_every_runtime_package_has_a_notice(self):
+        listed = {line.split(":", 1)[1].strip() for line in self.notices.splitlines() if line.startswith("Package:")}
+        for package_name in self.build.runtime_packages():
+            self.assertIn(package_name, listed)
+        for package_name in ("acorn", "@dagrejs/dagre", "@dagrejs/graphlib", "@angular/core", "rxjs", "tslib"):
+            self.assertIn(package_name, listed)
+
+    def test_the_bundle_starts_with_the_notices_as_one_comment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with open(self.build.bundle_with_notices(self.notices, directory), encoding="utf-8") as handle:
+                bundle = handle.read()
+        self.assertTrue(bundle.startswith("/*!\n"))
+        comment_end = bundle.index("*/")
+        self.assertIn("Package: acorn", bundle[:comment_end])
+        self.assertIn("Package: @dagrejs/graphlib", bundle[:comment_end])
