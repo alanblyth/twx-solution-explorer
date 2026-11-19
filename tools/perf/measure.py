@@ -3,7 +3,9 @@
 
   eval "$(python tools/perf/platform.py env)"
   python tools/perf/measure.py                         every scenario
-  python tools/perf/measure.py --scenarios list,open   a selection: list, open, extensions, project, project_incoming, trace, layout
+  python tools/perf/measure.py --scenarios list,open   a selection: list, open, open_uncapped, open_sequence, open_sequence_shared,
+                                                       extensions, project, project_incoming, project_from_body,
+                                                       project_incoming_from_body, trace, layout
 
 Each scenario issues the requests the app issues, in the same order and at the same concurrency (`mapWithLimit` limits of
 4, 6 and 8 from the components; Promise.all where the app uses it). A browser on HTTP/1.1 keeps at most 6 connections per
@@ -253,10 +255,12 @@ def scenario_list(platform):
     return found
 
 
-def open_entity(platform, collection, name, incoming_limit=None):
-    """The Entities tab's choose(): dependencies both ways, services, the body and the inheritance chain, all at once."""
+def open_entity(platform, collection, name, incoming_limit=None, shared_bodies=None):
+    """The Entities tab's choose(): dependencies both ways, services, the body and the inheritance chain, all at once.
+    shared_bodies: the 0.2.x pattern when None (bodies cached per choice, and the resolver reads the body again); a dict kept
+    across calls replays the shared entity cache (each body read once, whichever view asks)."""
     entity_type = collection[:-1]
-    bodies = {}
+    bodies = shared_bodies if shared_bodies is not None else {}
     bodies_lock = threading.Lock()
 
     def read(read_collection, read_name):
@@ -284,8 +288,9 @@ def open_entity(platform, collection, name, incoming_limit=None):
         # the app sends {}: the service then returns at most 500 rows (its maxItems default)
         "incoming": lambda: platform.service(f"{collection}/{urllib.parse.quote(name)}", "GetIncomingDependencies",
                                              {"maxItems": incoming_limit} if incoming_limit else {}),
-        # the resolver keeps its own cache, so listServices reads the body a second time
-        "services": lambda: platform.request("GET", f"{collection}/{urllib.parse.quote(name)}", kind="entity GET"),
+        # 0.2.x: the resolver keeps its own cache, so listServices reads the body a second time
+        "services": (lambda: read(collection, name)) if shared_bodies is not None else
+                    (lambda: platform.request("GET", f"{collection}/{urllib.parse.quote(name)}", kind="entity GET")),
         "inheritance": inheritance,
         "data things": lambda: [platform.service(f"ThingTemplates/{template}", "GetImplementingThings") for template in ("DataTable", "Stream", "ValueStream")],
     }
@@ -310,6 +315,18 @@ def scenario_open(platform):
     return {"hub template": open_entity(platform, "ThingTemplates", HUB_TEMPLATE),
             "a Thing (baseline)": open_entity(platform, "Things", "Lab.Perf.P03.T000000"),
             "a chained template (baseline)": open_entity(platform, "ThingTemplates", "Lab.Perf.E32.TT.Device")}
+
+
+OPEN_SEQUENCE = (("ThingTemplates", HUB_TEMPLATE), ("Things", "Lab.Perf.P03.T000000"), ("Things", "Lab.Perf.P02.T000001"),
+                 ("Things", "Lab.Perf.P05.T000002"), ("ThingTemplates", "Lab.Perf.E32.TT.Device"), ("ThingTemplates", "Lab.Perf.E33.TT.Device"))
+
+
+def scenario_open_sequence(platform, shared):
+    """A user browsing: the hub, three of its Things, then two chained templates, one after another."""
+    shared_bodies = {} if shared else None
+    for collection, name in OPEN_SEQUENCE:
+        open_entity(platform, collection, name, shared_bodies=shared_bodies)
+    return {"opened": len(OPEN_SEQUENCE), "shared_cache": shared}
 
 
 def package_list(platform):
@@ -356,8 +373,9 @@ def biggest_project(platform):
     return max(sizes)
 
 
-def scan_project(platform, name, read_incoming, read_calls):
-    """The Projects & Extensions tab's scan of one project."""
+def scan_project(platform, name, read_incoming, read_calls, things_from_body=False):
+    """The Projects & Extensions tab's scan of one project. things_from_body: a Thing whose body is read for its scripts
+    takes its outgoing dependencies from that body instead of calling GetOutgoingDependencies."""
     phase = {}
     started = time.perf_counter()
     listed = platform.service(f"Projects/{urllib.parse.quote(name)}", "GetEntities", kind="GetEntities (own)")[1]["rows"]
@@ -374,6 +392,11 @@ def scan_project(platform, name, read_incoming, read_calls):
     def member_work(member):
         entity_type, member_name = member
         path = f"{collection_of_type(entity_type)}/{urllib.parse.quote(member_name)}"
+        if things_from_body and read_calls and entity_type == "Thing":
+            platform.request("GET", path, kind="entity GET")
+            if read_incoming:
+                platform.service(path, "GetIncomingDependencies")
+            return
         status, _, _ = platform.service(path, "GetOutgoingDependencies")
         if status == 503:
             platform.request("GET", path, kind="entity GET")
@@ -389,7 +412,7 @@ def scan_project(platform, name, read_incoming, read_calls):
         platform.service(f"ThingTemplates/{template}", "GetImplementingThings")
     phase["data things_s"] = round(time.perf_counter() - started, 2)
     return {"project": name, "members": len(members), "other_projects": len(others), "rows_in_other_projects": sum(owned_rows),
-            "read_incoming": read_incoming, "read_calls": read_calls, "phases": phase}
+            "read_incoming": read_incoming, "read_calls": read_calls, "things_from_body": things_from_body, "phases": phase}
 
 
 def run_node(arguments, timeout=3600):
@@ -425,6 +448,10 @@ def main():
         "extensions": scenario_extensions,
         "project": lambda client: scan_project(client, project_name, read_incoming=False, read_calls=True),
         "project_incoming": lambda client: scan_project(client, project_name, read_incoming=True, read_calls=True),
+        "project_from_body": lambda client: scan_project(client, project_name, read_incoming=False, read_calls=True, things_from_body=True),
+        "project_incoming_from_body": lambda client: scan_project(client, project_name, read_incoming=True, read_calls=True, things_from_body=True),
+        "open_sequence": lambda client: scenario_open_sequence(client, shared=False),
+        "open_sequence_shared": lambda client: scenario_open_sequence(client, shared=True),
     }
     WORK_FOLDER.mkdir(parents=True, exist_ok=True)
     output_path = WORK_FOLDER / f"results-{time.strftime('%Y%m%d-%H%M%S')}.json"
