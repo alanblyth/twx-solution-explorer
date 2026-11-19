@@ -22,6 +22,7 @@ for (const [name, value] of new URLSearchParams(location.search)) element.setAtt
 
 class Handler(http.server.BaseHTTPRequestHandler):
     authorization = None
+    session_cookie = None
 
     def do_GET(self):
         if self.path.split("?")[0] == "/":
@@ -43,12 +44,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
         for name in ("Content-Type", "Accept", "X-XSRF-TOKEN"):
             if self.headers.get(name):
                 request.add_header(name, self.headers[name])
+        # Basic authentication costs the platform about 200 ms per request (it checks the password each time), so it is sent
+        # once and the session cookie it returns is reused, as a browser session would.
+        session = Handler.session_cookie
+        request.add_header(*(("Cookie", session) if session else ("Authorization", Handler.authorization)))
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                Handler.remember_session(response.headers.get("Set-Cookie"))
+                self.reply(response.status, response.read(), response.headers.get("Content-Type", "application/json"))
+        except urllib.error.HTTPError as error:
+            if error.code == 401 and session:
+                Handler.session_cookie = None   # expired: sign in again
+                error.close()
+                return self.forward_again(target, body)
+            self.reply(error.code, error.read(), error.headers.get("Content-Type", "text/plain"))
+
+    def forward_again(self, target, body):
+        request = urllib.request.Request(target, data=body, method=self.command)
+        for name in ("Content-Type", "Accept", "X-XSRF-TOKEN"):
+            if self.headers.get(name):
+                request.add_header(name, self.headers[name])
         request.add_header("Authorization", Handler.authorization)
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
+                Handler.remember_session(response.headers.get("Set-Cookie"))
                 self.reply(response.status, response.read(), response.headers.get("Content-Type", "application/json"))
         except urllib.error.HTTPError as error:
             self.reply(error.code, error.read(), error.headers.get("Content-Type", "text/plain"))
+
+    @classmethod
+    def remember_session(cls, set_cookie):
+        if set_cookie and "JSESSIONID=" in set_cookie and not cls.session_cookie:
+            cls.session_cookie = set_cookie.split(";", 1)[0]
 
     def reply(self, status, payload, content_type):
         self.send_response(status)
