@@ -10,6 +10,11 @@
             if (window.__seElementsVersion) { resolve(); return; }
             var script = document.createElement("script");
             script.id = "se-elements-bundle";
+            // The bundle is an ES module (Angular's application builder). Loaded as a classic script, its hundreds of
+            // minified top-level names became window globals: one replaced ThingWorx's "_" (the runtime then failed with
+            // "_.each is not a function") and others were overwritten by later page scripts, which broke Angular's signals
+            // ("t.consumerOnSignalRead is not a function") and left the Entities picker empty. A module keeps them private.
+            script.type = "module";
             script.src = "/Thingworx/Common/extensions/SolutionExplorer/ui/se-common/se-elements.js";
             script.onload = resolve;
             script.onerror = function () { promise = null; reject(new Error("se-elements.js failed to load")); };

@@ -23,7 +23,7 @@ PAGE = """<!doctype html><meta charset="utf-8"><title>Solution Explorer (dev)</t
 const element = document.querySelector("se-explorer");
 for (const [name, value] of new URLSearchParams(location.search)) element.setAttribute(name === "tab" ? "start-tab" : name === "collection" ? "entity-collection" : name, value);
 </script>
-<script src="/main.js"></script></body>"""
+<script type="module" src="/main.js"></script></body>"""
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
