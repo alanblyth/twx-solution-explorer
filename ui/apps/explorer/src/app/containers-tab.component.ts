@@ -74,7 +74,7 @@ const MAX_LISTED = 300;
       <div class="chooser">
         @if (optionsLoading()) { <p class="muted">Loading…</p> }
         @for (name of filteredOptions(); track name) {
-          <div class="option" [class.chosen]="name === chosen()" (click)="choose(name)" (dblclick)="choose(name); scan()">{{ name }}</div>
+          <div class="option" [class.chosen]="name === chosen()" (click)="choose(name)">{{ name }}</div>
         } @empty { @if (!optionsLoading()) { <p class="muted">No {{ kind() === 'Project' ? 'project' : 'extension' }} matches.</p> } }
         @if (optionCount() > filteredOptions().length) { <p class="muted">{{ optionCount() - filteredOptions().length }} more; filter to narrow.</p> }
       </div>
@@ -84,7 +84,7 @@ const MAX_LISTED = 300;
         } @else if (scanned(); as result) {
           <p class="muted pad">{{ result.kind }} {{ result.name }} has no entities you can see.</p>
         } @else {
-          <p class="muted pad">Pick a project or an extension and press Scan (or double-click it) to see how its entities relate to each other and to everything outside it.</p>
+          <p class="muted pad">Pick a project or an extension to scan it and see how its entities relate to each other and to everything outside it.</p>
         }
       </div>
       @if (scanned(); as result) {
@@ -267,8 +267,12 @@ export class ContainersTabComponent {
     this.filterText.set('');
   }
 
+  /** Picking a project or extension scans it, unless it is the one already shown or being scanned (Rescan reads it again). */
   protected choose(name: string): void {
+    const result = this.scanned();
+    const alreadyShown = name === this.chosen() && (this.status() === 'loading' || (result?.name === name && result.kind === this.kind()));
     this.chosen.set(name);
+    if (!alreadyShown) void this.scan();
   }
 
   protected cancel(): void { this.cancelled = true; }
