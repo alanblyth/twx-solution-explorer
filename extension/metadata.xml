@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Entities>
   <ExtensionPackages>
-    <ExtensionPackage name="SolutionExplorer" vendor="OMH Studios Ltd"
+    <ExtensionPackage name="SolutionExplorer" vendor="Alan Maynard-Blyth"
         description="Explore dependencies between extensions and entities, and the services a service can call"
         packageVersion="0.2.15" minimumThingWorxVersion="10.2.0" buildNumber="0"/>
   </ExtensionPackages>
