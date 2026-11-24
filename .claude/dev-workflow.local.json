@@ -1,0 +1,8 @@
+{
+  "knowledge_session": {
+    "name": "twx-knowledge",
+    "session_id": "local_d7ceb276-6704-4ce7-8371-cc689e7eb3d9",
+    "repository": "../twx-knowledge",
+    "required": true
+  }
+}
